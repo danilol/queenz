@@ -18,6 +18,8 @@ import (
 	"queenx/internal/ingestion"
 	ingestion_pg "queenx/internal/ingestion/repository/postgres"
 	lineage_neo4j "queenx/internal/lineage/repository/neo4j"
+	"queenx/internal/persona"
+	personaclient "queenx/internal/persona/client"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -137,11 +139,25 @@ func run(logger *slog.Logger) error {
 	}()
 
 	// --- 5. HTTP Handlers & Server Setup ---
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if geminiKey == "" {
+		logger.Warn("GEMINI_API_KEY is not configured. Persona generation will fail if requested.")
+	}
+	falKey := os.Getenv("FAL_API_KEY")
+	if falKey == "" {
+		logger.Warn("FAL_API_KEY is not configured. Persona image generation will fail if requested.")
+	}
+
+	geminiClient := personaclient.NewGeminiClient(geminiKey, "")
+	falClient := personaclient.NewFalClient(falKey, "")
+	personaService := persona.NewPersonaService(lineageRepo, geminiClient, falClient)
+	personaH := handler.NewPersonaHandler(personaService)
+
 	franchiseH := handler.NewFranchiseHandler(franchiseRepo, seasonRepo)
 	lineageH := handler.NewLineageHandler(lineageRepo)
 	jobH := handler.NewJobHandler(jobRepo)
 
-	server := api.NewServer(ctx, franchiseH, lineageH, jobH, logger)
+	server := api.NewServer(ctx, franchiseH, lineageH, jobH, personaH, logger)
 
 	// --- 6. Graceful Shutdown ---
 	serverErrChan := make(chan error, 1)

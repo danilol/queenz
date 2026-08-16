@@ -459,6 +459,47 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		assert.Equal(t, 20, siblings[0].Score, "Score should be exactly 20 points, with no duplicates or multiplying season scores")
 	})
 
+	t.Run("FindQueensByClassifications", func(t *testing.T) {
+		clearDatabase(ctx, t, driver)
+
+		// Create 3 queens with different classifications
+		q1 := &domain.Queen{
+			ID:              "queen-glam",
+			DragName:        "Gigi Goode",
+			BirthPlace:      "Los Angeles",
+			Classifications: []string{"fashion", "glamour"},
+		}
+		require.NoError(t, repo.CreateQueen(ctx, q1))
+
+		q2 := &domain.Queen{
+			ID:              "queen-comedy",
+			DragName:        "Jinkx Monsoon",
+			BirthPlace:      "Seattle",
+			Classifications: []string{"comedy", "camp"},
+		}
+		require.NoError(t, repo.CreateQueen(ctx, q2))
+
+		q3 := &domain.Queen{
+			ID:              "queen-hybrid",
+			DragName:        "Bob the Drag Queen",
+			BirthPlace:      "New York",
+			Classifications: []string{"comedy", "camp", "fashion"},
+		}
+		require.NoError(t, repo.CreateQueen(ctx, q3))
+
+		// Query for "comedy" and "camp" (should match Jinkx Monsoon and Bob)
+		results, err := repo.FindQueensByClassifications(ctx, []string{"comedy", "camp"}, 5)
+		require.NoError(t, err)
+
+		// Both Jinkx and Bob match, Gigi does not.
+		require.Equal(t, 2, len(results))
+
+		names := []string{results[0].DragName, results[1].DragName}
+		assert.Contains(t, names, "Jinkx Monsoon")
+		assert.Contains(t, names, "Bob the Drag Queen")
+		assert.NotContains(t, names, "Gigi Goode")
+	})
+
 	t.Run("Driver Connection Failure Errors", func(t *testing.T) {
 		failDriver, err := neo4j.NewDriverWithContext(boltURL, neo4j.BasicAuth("neo4j", adminPassword, ""))
 		require.NoError(t, err)
