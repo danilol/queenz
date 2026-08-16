@@ -3,6 +3,7 @@ package ingestion
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 // mockJobRepository implements JobRepository for testing.
 type mockJobRepository struct {
+	mu              sync.Mutex
 	jobs            map[string]*Job
 	claimError      error
 	updateError     error
@@ -20,27 +22,39 @@ type mockJobRepository struct {
 }
 
 func (m *mockJobRepository) Create(ctx context.Context, job *Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.jobs[job.ID] = job
 	return nil
 }
 
 func (m *mockJobRepository) GetByID(ctx context.Context, id string) (*Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if job, ok := m.jobs[id]; ok {
-		return job, nil
+		// Return a copy so callers don't mutate state directly
+		j := *job
+		return &j, nil
 	}
 	return nil, ErrJobNotFound
 }
 
 func (m *mockJobRepository) Update(ctx context.Context, job *Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.updateCallCount++
 	if m.updateError != nil {
 		return m.updateError
 	}
-	m.jobs[job.ID] = job
+	// Copy to store
+	j := *job
+	m.jobs[job.ID] = &j
 	return nil
 }
 
 func (m *mockJobRepository) ClaimNextJob(ctx context.Context, leaseDuration time.Duration) (*Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.claimCallCount++
 	if m.claimError != nil {
 		return nil, m.claimError
@@ -48,7 +62,9 @@ func (m *mockJobRepository) ClaimNextJob(ctx context.Context, leaseDuration time
 	for _, job := range m.jobs {
 		if job.Status == StatusPending {
 			job.Status = StatusRunning
-			return job, nil
+			// Return a copy
+			j := *job
+			return &j, nil
 		}
 	}
 	return nil, ErrNoJobsAvailable
@@ -67,7 +83,7 @@ func TestWorker_Success(t *testing.T) {
 
 	execFn := func(ctx context.Context, job *Job, progress chan<- string) error {
 		progress <- "Processing..."
-		time.Sleep(10 * time.Millisecond) // Give time for progress update
+		// Do not sleep. Rely on progress context cancellation sync.
 		return nil
 	}
 
@@ -99,7 +115,7 @@ func TestWorker_FailureAndRetry(t *testing.T) {
 	worker.pollAndExecute(context.Background())
 
 	job, _ := repo.GetByID(context.Background(), "job-1")
-	assert.Equal(t, StatusFailed, job.Status)
+	assert.Equal(t, StatusPending, job.Status) // Retrying sets it back to pending
 	assert.Equal(t, 1, job.Retries)
 	require.NotNil(t, job.ErrorMsg)
 	assert.Equal(t, "temporary network error", *job.ErrorMsg)
@@ -132,4 +148,32 @@ func TestWorker_MaxRetriesExhausted(t *testing.T) {
 	assert.Equal(t, 3, job.Retries)
 	assert.Equal(t, "Job failed after maximum retries.", job.Progress)
 	assert.Nil(t, job.LockedUntil)
+}
+
+func TestWorker_UpdateErrorLogging(t *testing.T) {
+	repo := &mockJobRepository{
+		jobs: map[string]*Job{
+			"job-1": {
+				ID:         "job-1",
+				Status:     StatusPending,
+				MaxRetries: 3,
+			},
+		},
+		updateError: errors.New("simulated db update error"),
+	}
+
+	execFn := func(ctx context.Context, job *Job, progress chan<- string) error {
+		return nil
+	}
+
+	worker := NewWorker(repo, execFn)
+	worker.pollAndExecute(context.Background())
+
+	// The job should remain untouched in repo since update fails
+	// It was picked up by ClaimNextJob, setting status to StatusRunning, but update fails
+	job, _ := repo.GetByID(context.Background(), "job-1")
+	assert.Equal(t, StatusRunning, job.Status) // Was running locally and db never updated to success
+	repo.mu.Lock()
+	assert.GreaterOrEqual(t, repo.updateCallCount, 1)
+	repo.mu.Unlock()
 }

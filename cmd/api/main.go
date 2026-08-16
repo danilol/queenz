@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,11 +13,13 @@ import (
 
 	"queenx/internal/api"
 	"queenx/internal/api/handler"
+	"queenx/internal/core/domain"
 	core_pg "queenx/internal/core/repository/postgres"
 	"queenx/internal/ingestion"
 	ingestion_pg "queenx/internal/ingestion/repository/postgres"
 	lineage_neo4j "queenx/internal/lineage/repository/neo4j"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -101,24 +104,36 @@ func run(logger *slog.Logger) error {
 
 		franchises, err := scraper.ScrapeFranchises(jobCtx)
 		if err != nil {
-			return err
+			return fmt.Errorf("scraping franchises: %w", err)
 		}
-		progress <- fmt.Sprintf("Scraped %d franchises.", len(franchises))
+		progress <- fmt.Sprintf("Scraped %d franchises. Synchronizing...", len(franchises))
 
-		// Detailed syncing logic to core database would go here using core repositories...
-		progress <- "Synchronizing relational schema..."
-		time.Sleep(2 * time.Second) // Simulate sync
+		for i, f := range franchises {
+			progress <- fmt.Sprintf("Saving franchise %d/%d: %s", i+1, len(franchises), f.Name)
+			domainF := &domain.Franchise{
+				ID:        uuid.New().String(), // Generate a new ID or extract from URL if possible
+				Name:      f.Name,
+				Country:   f.Country,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			}
+			err := franchiseRepo.Create(jobCtx, domainF)
+			if err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+				return fmt.Errorf("saving franchise %s: %w", f.Name, err)
+			}
+		}
 
 		progress <- "Done."
 		return nil
 	}
 
 	worker := ingestion.NewWorker(jobRepo, executeJob)
-
+	workerDone := make(chan struct{})
 	go func() {
 		logger.Info("Starting background ingestion worker")
 		worker.Start(ctx)
 		logger.Info("Background ingestion worker stopped")
+		close(workerDone)
 	}()
 
 	// --- 5. HTTP Handlers & Server Setup ---
@@ -126,7 +141,7 @@ func run(logger *slog.Logger) error {
 	lineageH := handler.NewLineageHandler(lineageRepo)
 	jobH := handler.NewJobHandler(jobRepo)
 
-	server := api.NewServer(franchiseH, lineageH, jobH, logger)
+	server := api.NewServer(ctx, franchiseH, lineageH, jobH, logger)
 
 	// --- 6. Graceful Shutdown ---
 	serverErrChan := make(chan error, 1)
@@ -135,7 +150,7 @@ func run(logger *slog.Logger) error {
 		if port == "" {
 			port = "8080"
 		}
-		if err := server.Start(":" + port); err != nil && err != http.ErrServerClosed {
+		if err := server.Start(ctx, ":"+port); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrChan <- fmt.Errorf("server start failed: %w", err)
 		}
 	}()
@@ -150,13 +165,18 @@ func run(logger *slog.Logger) error {
 		logger.Info("Received shutdown signal")
 	}
 
-	cancel() // Cancel context for background worker
+	cancel() // Cancel context for background worker and server
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	const shutdownTimeout = 10 * time.Second
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("server shutdown failed: %w", err)
+	// Wait for worker to finish or timeout
+	select {
+	case <-workerDone:
+		logger.Info("Worker shut down successfully")
+	case <-shutdownCtx.Done():
+		logger.Warn("Worker shutdown timed out")
 	}
 
 	logger.Info("Server exited gracefully")

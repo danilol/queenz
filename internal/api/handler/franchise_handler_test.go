@@ -10,52 +10,40 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
 type mockFranchiseRepo struct {
-	f   *domain.Franchise
-	err error
+	mock.Mock
 }
 
-func (m *mockFranchiseRepo) Create(ctx context.Context, f *domain.Franchise) error { return nil }
 func (m *mockFranchiseRepo) GetByID(ctx context.Context, id string) (*domain.Franchise, error) {
-	if m.err != nil {
-		return nil, m.err
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
 	}
-	return m.f, nil
+	return args.Get(0).(*domain.Franchise), args.Error(1)
 }
-func (m *mockFranchiseRepo) Update(ctx context.Context, f *domain.Franchise) error { return nil }
-func (m *mockFranchiseRepo) Delete(ctx context.Context, id string) error           { return nil }
+
 func (m *mockFranchiseRepo) List(ctx context.Context) ([]*domain.Franchise, error) {
-	if m.err != nil {
-		return nil, m.err
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
 	}
-	if m.f != nil {
-		return []*domain.Franchise{m.f}, nil
-	}
-	return nil, nil
+	return args.Get(0).([]*domain.Franchise), args.Error(1)
 }
 
 type mockSeasonRepo struct {
-	s   *domain.Season
-	err error
+	mock.Mock
 }
 
-func (m *mockSeasonRepo) Create(ctx context.Context, s *domain.Season) error { return nil }
-func (m *mockSeasonRepo) GetByID(ctx context.Context, id string) (*domain.Season, error) {
-	return nil, nil
-}
-func (m *mockSeasonRepo) Update(ctx context.Context, s *domain.Season) error { return nil }
-func (m *mockSeasonRepo) Delete(ctx context.Context, id string) error        { return nil }
 func (m *mockSeasonRepo) ListByFranchiseID(ctx context.Context, id string) ([]*domain.Season, error) {
-	if m.err != nil {
-		return nil, m.err
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
 	}
-	if m.s != nil {
-		return []*domain.Season{m.s}, nil
-	}
-	return nil, nil
+	return args.Get(0).([]*domain.Season), args.Error(1)
 }
 
 func TestFranchiseHandler_ListFranchises(t *testing.T) {
@@ -64,8 +52,9 @@ func TestFranchiseHandler_ListFranchises(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	fRepo := &mockFranchiseRepo{f: &domain.Franchise{ID: "f1", Name: "RPDR"}}
-	sRepo := &mockSeasonRepo{}
+	fRepo := new(mockFranchiseRepo)
+	fRepo.On("List", mock.Anything).Return([]*domain.Franchise{{ID: "f1", Name: "RPDR"}}, nil)
+	sRepo := new(mockSeasonRepo)
 	h := NewFranchiseHandler(fRepo, sRepo)
 
 	err := h.ListFranchises(c)
@@ -82,8 +71,9 @@ func TestFranchiseHandler_GetFranchise(t *testing.T) {
 	c.SetParamNames("id")
 	c.SetParamValues("f1")
 
-	fRepo := &mockFranchiseRepo{f: &domain.Franchise{ID: "f1", Name: "RPDR"}}
-	sRepo := &mockSeasonRepo{}
+	fRepo := new(mockFranchiseRepo)
+	fRepo.On("GetByID", mock.Anything, "f1").Return(&domain.Franchise{ID: "f1", Name: "RPDR"}, nil)
+	sRepo := new(mockSeasonRepo)
 	h := NewFranchiseHandler(fRepo, sRepo)
 
 	err := h.GetFranchise(c)
@@ -100,8 +90,10 @@ func TestFranchiseHandler_ListSeasons(t *testing.T) {
 	c.SetParamNames("id")
 	c.SetParamValues("f1")
 
-	fRepo := &mockFranchiseRepo{f: &domain.Franchise{ID: "f1", Name: "RPDR"}}
-	sRepo := &mockSeasonRepo{s: &domain.Season{ID: "s1", Name: "Season 1"}}
+	fRepo := new(mockFranchiseRepo)
+	fRepo.On("GetByID", mock.Anything, "f1").Return(&domain.Franchise{ID: "f1", Name: "RPDR"}, nil)
+	sRepo := new(mockSeasonRepo)
+	sRepo.On("ListByFranchiseID", mock.Anything, "f1").Return([]*domain.Season{{ID: "s1", Name: "Season 1"}}, nil)
 	h := NewFranchiseHandler(fRepo, sRepo)
 
 	err := h.ListSeasons(c)

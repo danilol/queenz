@@ -20,6 +20,8 @@ func NewEpisodeRepository(db DB) domain.EpisodeRepository {
 	return &episodeRepository{db: db}
 }
 
+const pgErrUniqueViolation = "23505"
+
 func (r *episodeRepository) Create(ctx context.Context, e *domain.Episode) error {
 	query := `
 		INSERT INTO episodes (id, season_id, title, number, air_date, created_at, updated_at)
@@ -28,7 +30,7 @@ func (r *episodeRepository) Create(ctx context.Context, e *domain.Episode) error
 	_, err := r.db.Exec(ctx, query, e.ID, e.SeasonID, e.Title, e.Number, e.AirDate, e.CreatedAt, e.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if errors.As(err, &pgErr) && pgErr.Code == pgErrUniqueViolation {
 			return fmt.Errorf("creating episode: %w", domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("creating episode: %w", err)
@@ -57,10 +59,10 @@ func (r *episodeRepository) GetByID(ctx context.Context, id string) (*domain.Epi
 func (r *episodeRepository) Update(ctx context.Context, e *domain.Episode) error {
 	query := `
 		UPDATE episodes
-		SET title = $1, number = $2, air_date = $3, updated_at = $4
-		WHERE id = $5
+		SET season_id = $1, title = $2, number = $3, air_date = $4, updated_at = $5
+		WHERE id = $6
 	`
-	cmdTag, err := r.db.Exec(ctx, query, e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID)
+	cmdTag, err := r.db.Exec(ctx, query, e.SeasonID, e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID)
 	if err != nil {
 		return fmt.Errorf("updating episode: %w", err)
 	}

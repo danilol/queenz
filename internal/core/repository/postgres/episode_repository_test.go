@@ -130,6 +130,7 @@ func TestEpisodeRepository_Update(t *testing.T) {
 
 	e := &domain.Episode{
 		ID:        "e-1",
+		SeasonID:  "s-1",
 		Title:     "Snatch Game Edit",
 		Number:    5,
 		AirDate:   now,
@@ -138,34 +139,43 @@ func TestEpisodeRepository_Update(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		mock.ExpectExec("UPDATE episodes").
-			WithArgs(e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID).
+			WithArgs(e.SeasonID, e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID).
 			WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 
 		err := repo.Update(ctx, e)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
 	})
 
 	t.Run("not found", func(t *testing.T) {
 		mock.ExpectExec("UPDATE episodes").
-			WithArgs(e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID).
+			WithArgs(e.SeasonID, e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID).
 			WillReturnResult(pgxmock.NewResult("UPDATE", 0))
 
 		err := repo.Update(ctx, e)
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("expected ErrNotFound, got %v", err)
 		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
+		}
 	})
 
 	t.Run("error", func(t *testing.T) {
 		mock.ExpectExec("UPDATE episodes").
-			WithArgs(e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID).
+			WithArgs(e.SeasonID, e.Title, e.Number, e.AirDate, e.UpdatedAt, e.ID).
 			WillReturnError(errors.New("db error"))
 
 		err := repo.Update(ctx, e)
 		if err == nil {
 			t.Error("expected error, got nil")
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("unfulfilled expectations: %s", err)
 		}
 	})
 }

@@ -2,36 +2,30 @@ package ingestion
 
 import (
 	"context"
-	"errors"
 	"time"
 )
 
-var (
-	// ErrJobNotFound is returned when a requested job does not exist in the database.
-	ErrJobNotFound = errors.New("job not found")
-
-	// ErrNoJobsAvailable is returned by ClaimNextJob when the queue is currently empty.
-	ErrNoJobsAvailable = errors.New("no jobs available to claim")
-)
+// JobStatus represents the state of a background job.
+type JobStatus string
 
 const (
-	StatusPending   = "pending"
-	StatusRunning   = "running"
-	StatusCompleted = "completed"
-	StatusFailed    = "failed"
+	StatusPending   JobStatus = "pending"
+	StatusRunning   JobStatus = "running"
+	StatusCompleted JobStatus = "completed"
+	StatusFailed    JobStatus = "failed"
 )
 
 // Job represents a background task execution within the Postgres job queue.
 type Job struct {
 	ID          string     `json:"id"`
-	Status      string     `json:"status"`
+	Status      JobStatus  `json:"status"`
 	Progress    string     `json:"progress"`
-	ErrorMsg    *string    `json:"error_msg,omitempty"`
+	ErrorMsg    *string    `json:"errorMsg,omitempty"`
 	Retries     int        `json:"retries"`
-	MaxRetries  int        `json:"max_retries"`
-	LockedUntil *time.Time `json:"locked_until,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	MaxRetries  int        `json:"maxRetries"`
+	LockedUntil *time.Time `json:"lockedUntil,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 // JobRepository defines the persistence operations for managing the task queue.

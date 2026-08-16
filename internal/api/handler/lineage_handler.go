@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,13 +11,23 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+const (
+	defaultSiblingLimit = 10
+	maxSiblingLimit     = 50
+)
+
+type lineageReader interface {
+	GetQueenByID(ctx context.Context, id string) (*domain.Queen, error)
+	FindAestheticSiblings(ctx context.Context, queenID string, limit int) ([]*domain.SiblingQueryResult, error)
+}
+
 // LineageHandler handles HTTP requests related to the Neo4j Social Graph context.
 type LineageHandler struct {
-	repo domain.LineageRepository
+	repo lineageReader
 }
 
 // NewLineageHandler creates a new LineageHandler.
-func NewLineageHandler(repo domain.LineageRepository) *LineageHandler {
+func NewLineageHandler(repo lineageReader) *LineageHandler {
 	return &LineageHandler{repo: repo}
 }
 
@@ -25,9 +36,9 @@ func (h *LineageHandler) FindAestheticSiblings(c echo.Context) error {
 	queenID := c.Param("id")
 
 	limitStr := c.QueryParam("limit")
-	limit := 10
+	limit := defaultSiblingLimit
 	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 50 {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= maxSiblingLimit {
 			limit = l
 		}
 	}

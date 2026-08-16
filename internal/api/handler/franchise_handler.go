@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -9,14 +10,23 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+type franchiseReader interface {
+	GetByID(ctx context.Context, id string) (*domain.Franchise, error)
+	List(ctx context.Context) ([]*domain.Franchise, error)
+}
+
+type seasonReader interface {
+	ListByFranchiseID(ctx context.Context, franchiseID string) ([]*domain.Season, error)
+}
+
 // FranchiseHandler handles HTTP requests related to Franchises and their Seasons.
 type FranchiseHandler struct {
-	fRepo domain.FranchiseRepository
-	sRepo domain.SeasonRepository
+	fRepo franchiseReader
+	sRepo seasonReader
 }
 
 // NewFranchiseHandler creates a new FranchiseHandler.
-func NewFranchiseHandler(fRepo domain.FranchiseRepository, sRepo domain.SeasonRepository) *FranchiseHandler {
+func NewFranchiseHandler(fRepo franchiseReader, sRepo seasonReader) *FranchiseHandler {
 	return &FranchiseHandler{
 		fRepo: fRepo,
 		sRepo: sRepo,

@@ -13,34 +13,34 @@ func EnsureSchema(ctx context.Context, db DB) error {
 			id VARCHAR(255) PRIMARY KEY,
 			name VARCHAR(255) NOT NULL,
 			country VARCHAR(255) NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);`,
 		`CREATE TABLE IF NOT EXISTS seasons (
 			id VARCHAR(255) PRIMARY KEY,
 			franchise_id VARCHAR(255) REFERENCES franchises(id) ON DELETE CASCADE,
 			name VARCHAR(255) NOT NULL,
 			number INT NOT NULL,
-			air_date TIMESTAMP NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+			air_date TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);`,
 		`CREATE TABLE IF NOT EXISTS episodes (
 			id VARCHAR(255) PRIMARY KEY,
 			season_id VARCHAR(255) REFERENCES seasons(id) ON DELETE CASCADE,
 			title VARCHAR(255) NOT NULL,
 			number INT NOT NULL,
-			air_date TIMESTAMP NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+			air_date TIMESTAMPTZ NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);`,
 		`CREATE TABLE IF NOT EXISTS persons (
 			id VARCHAR(255) PRIMARY KEY,
 			drag_name VARCHAR(255) NOT NULL,
 			real_name VARCHAR(255) NOT NULL,
 			birth_place VARCHAR(255) NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);`,
 		`CREATE TABLE IF NOT EXISTS ingestion_jobs (
 			id VARCHAR(255) PRIMARY KEY,
@@ -49,10 +49,11 @@ func EnsureSchema(ctx context.Context, db DB) error {
 			error_msg TEXT,
 			retries INT NOT NULL DEFAULT 0,
 			max_retries INT NOT NULL DEFAULT 3,
-			locked_until TIMESTAMP,
-			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+			locked_until TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);`,
+		`CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_claim ON ingestion_jobs (status, created_at) INCLUDE (retries, max_retries, locked_until);`,
 	}
 
 	for _, query := range queries {

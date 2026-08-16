@@ -12,6 +12,11 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	rateLimitRPS   = 5
+	rateLimitBurst = 10
+)
+
 // Server encapsulates the Echo framework and its dependencies.
 type Server struct {
 	echo       *echo.Echo
@@ -23,6 +28,7 @@ type Server struct {
 
 // NewServer initializes a new Echo Server with its dependencies.
 func NewServer(
+	ctx context.Context,
 	franchiseH *handler.FranchiseHandler,
 	lineageH *handler.LineageHandler,
 	jobH *handler.JobHandler,
@@ -40,16 +46,16 @@ func NewServer(
 		logger:     logger,
 	}
 
-	s.setupMiddlewares()
+	s.setupMiddlewares(ctx)
 	s.setupRoutes()
 
 	return s
 }
 
-func (s *Server) setupMiddlewares() {
+func (s *Server) setupMiddlewares(ctx context.Context) {
 	s.echo.Use(echoMiddleware.Recover())
 	s.echo.Use(middleware.Logger(s.logger))
-	s.echo.Use(middleware.RateLimiter(rate.Limit(5), 10)) // 5 req/s burst 10
+	s.echo.Use(middleware.RateLimiter(ctx, rate.Limit(rateLimitRPS), rateLimitBurst))
 }
 
 func (s *Server) setupRoutes() {
@@ -70,13 +76,20 @@ func (s *Server) setupRoutes() {
 }
 
 // Start runs the HTTP server.
-func (s *Server) Start(address string) error {
+func (s *Server) Start(ctx context.Context, address string) error {
 	s.logger.Info("Starting API server...", slog.String("address", address))
-	return s.echo.Start(address)
-}
 
-// Shutdown gracefully shuts down the server.
-func (s *Server) Shutdown(ctx context.Context) error {
-	s.logger.Info("Shutting down API server gracefully...")
-	return s.echo.Shutdown(ctx)
+	// Start server in background to allow shutdown
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.echo.Start(address)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		s.logger.Info("Shutting down API server gracefully...")
+		return s.echo.Shutdown(context.Background())
+	}
 }

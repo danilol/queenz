@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -11,13 +14,45 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// JobDTO represents the API response for an ingestion job.
+type JobDTO struct {
+	ID          string              `json:"id"`
+	Status      ingestion.JobStatus `json:"status"`
+	Progress    string              `json:"progress"`
+	ErrorMsg    *string             `json:"errorMsg,omitempty"`
+	Retries     int                 `json:"retries"`
+	MaxRetries  int                 `json:"maxRetries"`
+	LockedUntil *time.Time          `json:"lockedUntil,omitempty"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	UpdatedAt   time.Time           `json:"updatedAt"`
+}
+
+func mapToJobDTO(j *ingestion.Job) JobDTO {
+	return JobDTO{
+		ID:          j.ID,
+		Status:      j.Status,
+		Progress:    j.Progress,
+		ErrorMsg:    j.ErrorMsg,
+		Retries:     j.Retries,
+		MaxRetries:  j.MaxRetries,
+		LockedUntil: j.LockedUntil,
+		CreatedAt:   j.CreatedAt,
+		UpdatedAt:   j.UpdatedAt,
+	}
+}
+
+type jobRepository interface {
+	Create(ctx context.Context, job *ingestion.Job) error
+	GetByID(ctx context.Context, id string) (*ingestion.Job, error)
+}
+
 // JobHandler handles HTTP requests related to ingestion jobs.
 type JobHandler struct {
-	repo ingestion.JobRepository
+	repo jobRepository
 }
 
 // NewJobHandler creates a new JobHandler.
-func NewJobHandler(repo ingestion.JobRepository) *JobHandler {
+func NewJobHandler(repo jobRepository) *JobHandler {
 	return &JobHandler{repo: repo}
 }
 
@@ -50,13 +85,13 @@ func (h *JobHandler) GetJob(c echo.Context) error {
 	jobID := c.Param("id")
 	job, err := h.repo.GetByID(c.Request().Context(), jobID)
 	if err != nil {
-		if errorsIs(err, ingestion.ErrJobNotFound) {
+		if errors.Is(err, ingestion.ErrJobNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "job not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get job")
 	}
 
-	return c.JSON(http.StatusOK, job)
+	return c.JSON(http.StatusOK, mapToJobDTO(job))
 }
 
 // GetJobProgressSSE streams the progress of a job via Server-Sent Events.
@@ -73,7 +108,7 @@ func (h *JobHandler) GetJobProgressSSE(c echo.Context) error {
 	// Initial fetch to make sure the job exists before streaming
 	_, err := h.repo.GetByID(c.Request().Context(), jobID)
 	if err != nil {
-		if errorsIs(err, ingestion.ErrJobNotFound) {
+		if errors.Is(err, ingestion.ErrJobNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "job not found")
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get job")
@@ -90,7 +125,15 @@ func (h *JobHandler) GetJobProgressSSE(c echo.Context) error {
 				return err
 			}
 
-			_, _ = fmt.Fprintf(w, "data: {\"status\":\"%s\",\"progress\":\"%s\"}\n\n", job.Status, job.Progress)
+			dto := struct {
+				Status   ingestion.JobStatus `json:"status"`
+				Progress string              `json:"progress"`
+			}{
+				Status:   job.Status,
+				Progress: job.Progress,
+			}
+			dataBytes, _ := json.Marshal(dto)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(dataBytes))
 			c.Response().Flush()
 
 			if job.Status == ingestion.StatusCompleted || job.Status == ingestion.StatusFailed {
@@ -98,9 +141,4 @@ func (h *JobHandler) GetJobProgressSSE(c echo.Context) error {
 			}
 		}
 	}
-}
-
-// Helper to avoid directly importing "errors" if not strictly needed
-func errorsIs(err, target error) bool {
-	return err != nil && err.Error() == target.Error()
 }

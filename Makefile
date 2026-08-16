@@ -1,4 +1,4 @@
-.PHONY: test test-short lint fmt build clean run help
+.PHONY: all test test-short lint fmt build clean run help
 
 # Default target runs linter, tests, and builds
 all: lint test build

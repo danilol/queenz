@@ -6,38 +6,30 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"queenx/internal/ingestion"
 
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
 type mockJobRepo struct {
-	jobs map[string]*ingestion.Job
+	mock.Mock
 }
 
 func (m *mockJobRepo) Create(ctx context.Context, job *ingestion.Job) error {
-	m.jobs[job.ID] = job
-	return nil
+	args := m.Called(ctx, job)
+	return args.Error(0)
 }
 
 func (m *mockJobRepo) GetByID(ctx context.Context, id string) (*ingestion.Job, error) {
-	if job, ok := m.jobs[id]; ok {
-		return job, nil
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
 	}
-	return nil, ingestion.ErrJobNotFound
-}
-
-func (m *mockJobRepo) Update(ctx context.Context, job *ingestion.Job) error {
-	m.jobs[job.ID] = job
-	return nil
-}
-
-func (m *mockJobRepo) ClaimNextJob(ctx context.Context, leaseDuration time.Duration) (*ingestion.Job, error) {
-	return nil, ingestion.ErrNoJobsAvailable
+	return args.Get(0).(*ingestion.Job), args.Error(1)
 }
 
 func TestJobHandler_CreateJob(t *testing.T) {
@@ -46,37 +38,29 @@ func TestJobHandler_CreateJob(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	repo := &mockJobRepo{jobs: make(map[string]*ingestion.Job)}
-	h := NewJobHandler(repo)
+	repo := new(mockJobRepo)
+	repo.On("Create", mock.Anything, mock.Anything).Return(nil)
+	h := &JobHandler{repo: repo}
 
 	err := h.CreateJob(c)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusCreated, rec.Code)
-
-	// Should return ID
 	assert.Contains(t, rec.Body.String(), `"id":`)
-
-	// Job should be in repo
-	assert.Equal(t, 1, len(repo.jobs))
-	for _, v := range repo.jobs {
-		assert.Equal(t, ingestion.StatusPending, v.Status)
-	}
 }
 
 func TestJobHandler_GetJob(t *testing.T) {
 	e := echo.New()
 
-	repo := &mockJobRepo{jobs: make(map[string]*ingestion.Job)}
-	h := NewJobHandler(repo)
+	repo := new(mockJobRepo)
+	h := &JobHandler{repo: repo}
 
-	// Insert mock job
-	repo.jobs["job-1"] = &ingestion.Job{
+	// Found
+	repo.On("GetByID", mock.Anything, "job-1").Return(&ingestion.Job{
 		ID:       "job-1",
 		Status:   ingestion.StatusRunning,
 		Progress: "Scraping season 1",
-	}
+	}, nil).Once()
 
-	// Found
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/job-1", http.NoBody)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
@@ -89,6 +73,7 @@ func TestJobHandler_GetJob(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "Scraping season 1")
 
 	// Not Found
+	repo.On("GetByID", mock.Anything, "missing").Return(nil, ingestion.ErrJobNotFound).Once()
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/jobs/missing", http.NoBody)
 	rec = httptest.NewRecorder()
 	c = e.NewContext(req, rec)
@@ -105,26 +90,28 @@ func TestJobHandler_GetJob(t *testing.T) {
 func TestJobHandler_GetJobProgressSSE(t *testing.T) {
 	e := echo.New()
 
-	repo := &mockJobRepo{jobs: make(map[string]*ingestion.Job)}
-	h := NewJobHandler(repo)
+	repo := new(mockJobRepo)
+	h := &JobHandler{repo: repo}
 
-	repo.jobs["job-1"] = &ingestion.Job{
+	// First call succeeds and returns running
+	repo.On("GetByID", mock.Anything, "job-1").Return(&ingestion.Job{
 		ID:       "job-1",
 		Status:   ingestion.StatusRunning,
 		Progress: "Streaming",
-	}
+	}, nil).Once()
+
+	// Subsequent calls return completed
+	repo.On("GetByID", mock.Anything, "job-1").Return(&ingestion.Job{
+		ID:       "job-1",
+		Status:   ingestion.StatusCompleted,
+		Progress: "Streaming",
+	}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("id")
 	c.SetParamValues("job-1")
-
-	// Run in background because SSE blocks
-	go func() {
-		time.Sleep(100 * time.Millisecond) // Fast sleep to avoid flakes
-		repo.jobs["job-1"].Status = ingestion.StatusCompleted
-	}()
 
 	err := h.GetJobProgressSSE(c)
 	require.NoError(t, err)

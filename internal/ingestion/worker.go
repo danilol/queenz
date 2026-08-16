@@ -4,8 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
+)
+
+const (
+	defaultPollInterval  = 2 * time.Second
+	defaultLeaseDuration = 5 * time.Minute
+	progressChanSize     = 10
+	backoffMultiplier    = 10
 )
 
 // Worker represents the background worker process responsible for polling
@@ -21,8 +29,8 @@ type Worker struct {
 func NewWorker(repo JobRepository, executeFn func(ctx context.Context, job *Job, progress chan<- string) error) *Worker {
 	return &Worker{
 		repo:          repo,
-		pollInterval:  2 * time.Second,
-		leaseDuration: 5 * time.Minute,
+		pollInterval:  defaultPollInterval,
+		leaseDuration: defaultLeaseDuration,
 		executeFn:     executeFn,
 	}
 }
@@ -48,16 +56,18 @@ func (w *Worker) pollAndExecute(ctx context.Context) {
 		if errors.Is(err, ErrNoJobsAvailable) {
 			return // No jobs available, just return and wait for next tick
 		}
-		// In a real application, we would use structured logging here (e.g. slog.Error)
+		slog.Error("failed to claim next job", "error", err)
 		return
 	}
 
-	progressCh := make(chan string, 10)
+	progressCh := make(chan string, progressChanSize)
+	progressDoneCh := make(chan struct{})
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Goroutine to periodically update job progress in the database
 	go func() {
+		defer close(progressDoneCh)
 		for {
 			select {
 			case <-execCtx.Done():
@@ -72,15 +82,17 @@ func (w *Worker) pollAndExecute(ctx context.Context) {
 				lockedUntil := time.Now().Add(w.leaseDuration)
 				job.LockedUntil = &lockedUntil
 
-				_ = w.repo.Update(execCtx, job)
+				if updateErr := w.repo.Update(execCtx, job); updateErr != nil {
+					slog.Error("failed to update job progress", "job_id", job.ID, "error", updateErr)
+				}
 			}
 		}
 	}()
 
 	err = w.executeFn(execCtx, job, progressCh)
 
-	// Close progress channel so the progress updater goroutine exits
-	close(progressCh)
+	cancel()         // ensure progress updater exits
+	<-progressDoneCh // wait for progress updater to finish
 
 	if err != nil {
 		w.handleFailure(ctx, job, err)
@@ -95,7 +107,9 @@ func (w *Worker) handleSuccess(ctx context.Context, job *Job) {
 	job.Progress = "Ingestion completed successfully."
 	job.UpdatedAt = time.Now()
 	job.LockedUntil = nil
-	_ = w.repo.Update(ctx, job)
+	if updateErr := w.repo.Update(ctx, job); updateErr != nil {
+		slog.Error("failed to update job success status", "job_id", job.ID, "error", updateErr)
+	}
 }
 
 func (w *Worker) handleFailure(ctx context.Context, job *Job, err error) {
@@ -109,12 +123,14 @@ func (w *Worker) handleFailure(ctx context.Context, job *Job, err error) {
 		job.Progress = "Job failed after maximum retries."
 		job.LockedUntil = nil
 	} else {
-		job.Status = StatusFailed
+		job.Status = StatusPending
 		job.Progress = fmt.Sprintf("Job failed, retrying (%d/%d)...", job.Retries, job.MaxRetries)
 		// Exponential backoff
-		backoffSeconds := math.Pow(2, float64(job.Retries)) * 10
+		backoffSeconds := math.Pow(2, float64(job.Retries)) * backoffMultiplier
 		lockedUntil := time.Now().Add(time.Duration(backoffSeconds) * time.Second)
 		job.LockedUntil = &lockedUntil
 	}
-	_ = w.repo.Update(ctx, job)
+	if updateErr := w.repo.Update(ctx, job); updateErr != nil {
+		slog.Error("failed to update job failure status", "job_id", job.ID, "error", updateErr)
+	}
 }

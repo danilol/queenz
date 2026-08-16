@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"time"
@@ -9,13 +10,18 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	cleanupInterval = 1 * time.Minute
+	visitorExpire   = 3 * time.Minute
+)
+
 type clientVisitor struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
 }
 
 // RateLimiter returns an Echo middleware that performs IP-based rate limiting.
-func RateLimiter(r rate.Limit, b int) echo.MiddlewareFunc {
+func RateLimiter(ctx context.Context, r rate.Limit, b int) echo.MiddlewareFunc {
 	var (
 		mu       sync.Mutex
 		visitors = make(map[string]*clientVisitor)
@@ -23,15 +29,21 @@ func RateLimiter(r rate.Limit, b int) echo.MiddlewareFunc {
 
 	// Background routine to cleanup old visitors
 	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
 		for {
-			time.Sleep(1 * time.Minute)
-			mu.Lock()
-			for ip, v := range visitors {
-				if time.Since(v.lastSeen) > 3*time.Minute {
-					delete(visitors, ip)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				mu.Lock()
+				for ip, v := range visitors {
+					if time.Since(v.lastSeen) > visitorExpire {
+						delete(visitors, ip)
+					}
 				}
+				mu.Unlock()
 			}
-			mu.Unlock()
 		}
 	}()
 
@@ -43,11 +55,12 @@ func RateLimiter(r rate.Limit, b int) echo.MiddlewareFunc {
 			v, exists := visitors[ip]
 			if !exists {
 				limiter := rate.NewLimiter(r, b)
-				visitors[ip] = &clientVisitor{limiter: limiter, lastSeen: time.Now()}
-				mu.Unlock()
-				return next(c)
+				v = &clientVisitor{limiter: limiter, lastSeen: time.Now()}
+				visitors[ip] = v
+			} else {
+				v.lastSeen = time.Now()
 			}
-			v.lastSeen = time.Now()
+
 			if !v.limiter.Allow() {
 				mu.Unlock()
 				return echo.NewHTTPError(http.StatusTooManyRequests, "rate limit exceeded")
