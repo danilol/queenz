@@ -3,6 +3,8 @@ package neo4j_test
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	tc_neo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
+)
+
+const (
+	testTimeout = 3 * time.Minute
 )
 
 func clearDatabase(ctx context.Context, t *testing.T, driver neo4j.DriverWithContext) {
@@ -36,7 +42,7 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		t.Skip("skipping integration tests in short mode")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
 	defer cancel()
 
 	// 1. Spin up Neo4j test container
@@ -45,7 +51,16 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		tc_neo4j.WithAdminPassword(adminPassword),
 	)
 	if containerErr != nil {
-		t.Skipf("Docker is likely not running or container failed to start: %v", containerErr)
+		errStr := containerErr.Error()
+		isDockerMissing := strings.Contains(errStr, "docker") ||
+			strings.Contains(errStr, "socket") ||
+			strings.Contains(errStr, "connection refused") ||
+			strings.Contains(errStr, "not found") ||
+			strings.Contains(errStr, "daemon")
+		if os.Getenv("CI") != "" || !isDockerMissing {
+			t.Fatalf("Failed to start Neo4j container: %v", containerErr)
+		}
+		t.Skipf("Skipping integration test; Docker is likely not running: %v", containerErr)
 	}
 	defer func() {
 		_ = neo4jContainer.Terminate(context.Background())
@@ -59,7 +74,7 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 	driver, driverErr := neo4j.NewDriverWithContext(boltURL, neo4j.BasicAuth("neo4j", adminPassword, ""))
 	require.NoError(t, driverErr)
 	defer func() {
-		_ = driver.Close(ctx)
+		_ = driver.Close(context.Background())
 	}()
 
 	// Verify connectivity
@@ -303,7 +318,7 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		require.NoError(t, repo.AddParticipation(ctx, "jaida-id", "s12", "Winner", 3))
 
 		// Execute FindAestheticSiblings for Gigi Goode
-		siblings, err := repo.FindAestheticSiblings(ctx, "gigi-id")
+		siblings, err := repo.FindAestheticSiblings(ctx, "gigi-id", 5)
 		require.NoError(t, err)
 
 		// Assertions on results (Symone should be first, Gottmik second, Jaida third)
@@ -334,6 +349,61 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		assert.Equal(t, "symone-id", siblings[0].Queen.ID, "Symone should be the top aesthetic sibling")
 		assert.Equal(t, "gottmik-id", siblings[1].Queen.ID, "Gottmik should be the second aesthetic sibling")
 		assert.Equal(t, "jaida-id", siblings[2].Queen.ID, "Jaida should be the third aesthetic sibling")
+	})
+
+	t.Run("FindAestheticSiblings Multiple Houses Test", func(t *testing.T) {
+		clearDatabase(ctx, t, driver)
+
+		// Setup target queen and sibling queen
+		target := &domain.Queen{
+			ID:              "target-id",
+			DragName:        "Aria",
+			BirthPlace:      "New York",
+			Classifications: []string{"pageant"},
+		}
+		require.NoError(t, repo.CreateQueen(ctx, target))
+
+		sibling := &domain.Queen{
+			ID:              "sibling-id",
+			DragName:        "Bella",
+			BirthPlace:      "New York",
+			Classifications: []string{"pageant"},
+		}
+		require.NoError(t, repo.CreateQueen(ctx, sibling))
+
+		// Create 2 houses and link BOTH queens to both houses (Shares multiple houses)
+		h1 := &domain.House{ID: "house-1", Name: "House of Aria"}
+		require.NoError(t, repo.CreateHouse(ctx, h1))
+		require.NoError(t, repo.AddHouseMember(ctx, "target-id", "house-1"))
+		require.NoError(t, repo.AddHouseMember(ctx, "sibling-id", "house-1"))
+
+		h2 := &domain.House{ID: "house-2", Name: "House of Sparkle"}
+		require.NoError(t, repo.CreateHouse(ctx, h2))
+		require.NoError(t, repo.AddHouseMember(ctx, "target-id", "house-2"))
+		require.NoError(t, repo.AddHouseMember(ctx, "sibling-id", "house-2"))
+
+		// Create 1 season and link BOTH queens to it (Shares 1 season)
+		s1 := &domain.Season{ID: "season-1", Name: "Season 1", FranchiseID: "us"}
+		require.NoError(t, repo.CreateSeason(ctx, s1))
+		require.NoError(t, repo.AddParticipation(ctx, "target-id", "season-1", "3rd", 1))
+		require.NoError(t, repo.AddParticipation(ctx, "sibling-id", "season-1", "3rd", 1))
+
+		// Run aesthetic siblings query
+		siblings, err := repo.FindAestheticSiblings(ctx, "target-id", 5)
+		require.NoError(t, err)
+
+		// Verification:
+		// Bella should be returned EXACTLY once (no duplication).
+		require.Equal(t, 1, len(siblings), "Expected exactly 1 sibling returned")
+		assert.Equal(t, "sibling-id", siblings[0].Queen.ID)
+
+		// Correct score calculations (Grouped aggregation on house prevents multiplication/duplication):
+		// - Shares at least one House: +10 pts
+		// - Shares Season (1 season): +5 pts (NOT duplicated/multiplied to 10 by the 2 house matches)
+		// - Same Birth Place: +2 pts
+		// - Shares Classifications (1 tag): +3 pts
+		// Expected Score: 10 + 5 + 2 + 3 = 20 pts
+		assert.Equal(t, 20, siblings[0].Score, "Score should be exactly 20 points, with no duplicates or multiplying season scores")
 	})
 
 	t.Run("Driver Connection Failure Errors", func(t *testing.T) {
@@ -389,7 +459,7 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to add lip sync relationship")
 
-		_, err = failRepo.FindAestheticSiblings(ctx, "fail")
+		_, err = failRepo.FindAestheticSiblings(ctx, "fail", 5)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to find aesthetic siblings")
 	})

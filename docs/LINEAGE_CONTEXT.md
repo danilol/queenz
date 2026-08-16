@@ -42,9 +42,10 @@ Following **Domain-Driven Design (DDD)** and **Clean Architecture** principles, 
    - Connection: `(:Queen)-[:DRAG_MOTHER_OF]->(:Queen)`
    - Meaning: Mentorship, genealogical heritage (e.g., Alyssa Edwards to Shangela).
 
-2. **`SISTER_OF`** (Bi-directional)
+2. **`SISTER_OF`** (Bi-directional / Symmetric)
    - Connection: `(:Queen)-[:SISTER_OF]-(:Queen)`
    - Meaning: Sisters within the same generation.
+   - Storage optimization: Stored as exactly one canonical directed edge (`s1->s2`) where `s1.id < s2.id` to prevent reciprocal duplicates while supporting fast undirected matching.
 
 3. **`MEMBER_OF`** (Directed)
    - Connection: `(:Queen)-[:MEMBER_OF]->(:House)`
@@ -56,12 +57,13 @@ Following **Domain-Driven Design (DDD)** and **Clean Architecture** principles, 
      - `placement` (String, e.g., `"Runner-up"`, `"Winner"`)
      - `wins` (Integer)
 
-5. **`LIP_SYNCED_AGAINST`** (Bi-directional, with Properties)
-   - Connection: `(:Queen)-[l:LIP_SYNCED_AGAINST]-(:Queen)`
+5. **`LIP_SYNCED_AGAINST`** (Bi-directional / Symmetric)
+   - Connection: `(:Queen)-[:LIP_SYNCED_AGAINST]-(:Queen)`
    - Properties:
      - `song` (String)
      - `episodeId` (String)
      - `winnerId` (String)
+   - Storage optimization: Stored as exactly one canonical directed edge (`q1->q2`) where `q1.id < q2.id` to prevent duplicate reciprocal links.
 
 ---
 
@@ -82,9 +84,11 @@ A primary feature of the Lineage Context is finding "Aesthetic Siblings" utilizi
 MATCH (q:Queen {id: $queenID})
 MATCH (other:Queen) WHERE other.id <> q.id
 
-// 1. Shared House Score
+// 1. Shared House Score - aggregate h first to prevent duplicate multiplication
 OPTIONAL MATCH (q)-[:MEMBER_OF]->(h:House)<-[:MEMBER_OF]-(other)
-WITH q, other, CASE WHEN h IS NOT NULL THEN 10 ELSE 0 END AS houseScore, h.name AS sharedHouse
+WITH q, other, 
+     CASE WHEN count(h) > 0 THEN 10 ELSE 0 END AS houseScore, 
+     coalesce(collect(h.name)[0], "") AS sharedHouse
 
 // 2. Shared Season Score
 OPTIONAL MATCH (q)-[:PARTICIPATED_IN]->(s:Season)<-[:PARTICIPATED_IN]-(other)
@@ -104,6 +108,7 @@ WHERE totalScore > 0
 
 RETURN other, coalesce(sharedHouse, "") AS sharedHouse, totalScore
 ORDER BY totalScore DESC, other.dragName ASC
+LIMIT $limit
 ```
 
 ---

@@ -22,5 +22,5 @@ type LineageRepository interface {
 
 	// Graph Traversals
 	// FindAestheticSiblings scores siblings based on shared Houses, Seasons, birthPlace, and classifications.
-	FindAestheticSiblings(ctx context.Context, queenID string) ([]*SiblingQueryResult, error)
+	FindAestheticSiblings(ctx context.Context, queenID string, limit int) ([]*SiblingQueryResult, error)
 }
