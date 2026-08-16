@@ -76,7 +76,10 @@ To spin up local PostgreSQL, Neo4j, and Redis databases or run our suite of test
     - Built decoupled, robust HTML parsers (`Franchise`, `Season`, `Episode`) under `internal/ingestion/parser` to isolate parsing from networking.
     - Implemented respectful rate limits, user-agent headers, and concurrent fan-out fetching via `errgroup`.
     - Wrote extensive table-driven unit and integration tests (using local mock `httptest` HTTP servers) achieving **96.8% coverage** in the parser package and **85.6% coverage** in the scraper package with 0 linter warnings.
-- [ ] **Phase 3: Social Graph (Neo4j Integration)**
+- [x] **Phase 3: Social Graph (Neo4j Integration)**
+    - Modeled the social graph of Drag Queens with graph nodes (`Queen`, `House`, `Season`) and bidirectional/weighted relationships (`DRAG_MOTHER_OF`, `SISTER_OF`, `MEMBER_OF`, `PARTICIPATED_IN`, `LIP_SYNCED_AGAINST`).
+    - Implemented a real-time Cypher similarity-traversal engine `FindAestheticSiblings` incorporating shared houses, seasons, birthplaces, and classifications.
+    - Achieved **77.0% code coverage** in the graph lineage package using containerized integration tests powered by `testcontainers-go`.
 - [ ] **Phase 4: API Layer & BFF (Backend-for-Frontend)**
 - [ ] **Phase 5: AI Persona Engine (Gemini & Fal.ai)**
 - [ ] **Phase 6: Next.js Frontend Application**
