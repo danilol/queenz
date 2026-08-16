@@ -28,6 +28,30 @@ func NewRepository(driver neo4j.DriverWithContext) *Repository {
 	return &Repository{driver: driver}
 }
 
+// EnsureConstraints idempotently creates uniqueness constraints for the ID property of Queen, House, and Season labels in Neo4j.
+func (r *Repository) EnsureConstraints(ctx context.Context) error {
+	session := r.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer func() {
+		_ = session.Close(ctx)
+	}()
+
+	constraints := []string{
+		"CREATE CONSTRAINT queen_id_unique IF NOT EXISTS FOR (q:Queen) REQUIRE q.id IS UNIQUE",
+		"CREATE CONSTRAINT house_id_unique IF NOT EXISTS FOR (h:House) REQUIRE h.id IS UNIQUE",
+		"CREATE CONSTRAINT season_id_unique IF NOT EXISTS FOR (s:Season) REQUIRE s.id IS UNIQUE",
+	}
+
+	for _, stmt := range constraints {
+		_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+			return tx.Run(ctx, stmt, nil)
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create constraint: %w", err)
+		}
+	}
+	return nil
+}
+
 // executeNodeRead is a generic helper that matching a single node by ID, maps its properties,
 // and centralizes session handling, record/node validations, and not-found behavior.
 func (r *Repository) executeNodeRead(ctx context.Context, id, label string, mapper func(map[string]any) any, errCtx string) (any, error) {
@@ -74,9 +98,9 @@ func (r *Repository) executeNodeRead(ctx context.Context, id, label string, mapp
 	return mapper(node.GetProperties()), nil
 }
 
-// executeNodeMerge is a generic helper that creates or merges a single node in the graph,
-// centralizing write session management, transactions, and error handling.
-func (r *Repository) executeNodeMerge(ctx context.Context, query string, params map[string]any, errCtx string) error {
+// executeNodeCreate is a generic helper that creates a single node in the graph,
+// centralizing write session management, transactions, constraint validation mapping, and error handling.
+func (r *Repository) executeNodeCreate(ctx context.Context, query string, params map[string]any, errCtx string) error {
 	session := r.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer func() {
 		_ = session.Close(ctx)
@@ -96,6 +120,10 @@ func (r *Repository) executeNodeMerge(ctx context.Context, query string, params 
 		return nil, domain.ErrNotFound
 	})
 	if err != nil {
+		var neoErr *neo4j.Neo4jError
+		if errors.As(err, &neoErr) && neoErr.Code == "Neo.ClientError.Schema.ConstraintValidationFailed" {
+			return domain.ErrAlreadyExists
+		}
 		return fmt.Errorf("%s: %w", errCtx, err)
 	}
 	return nil
@@ -134,11 +162,13 @@ func (r *Repository) executeRelationshipWrite(ctx context.Context, query string,
 // CreateQueen persists or merges a Queen node in the graph database.
 func (r *Repository) CreateQueen(ctx context.Context, q *domain.Queen) error {
 	query := `
-		MERGE (q:Queen {id: $id})
-		SET q.dragName = $dragName,
-		    q.realName = $realName,
-		    q.birthPlace = $birthPlace,
-		    q.classifications = $classifications
+		CREATE (q:Queen {
+			id: $id,
+			dragName: $dragName,
+			realName: $realName,
+			birthPlace: $birthPlace,
+			classifications: $classifications
+		})
 		RETURN q
 	`
 	params := map[string]any{
@@ -148,7 +178,7 @@ func (r *Repository) CreateQueen(ctx context.Context, q *domain.Queen) error {
 		birthPlaceParam:      q.BirthPlace,
 		classificationsParam: q.Classifications,
 	}
-	return r.executeNodeMerge(ctx, query, params, "failed to create queen")
+	return r.executeNodeCreate(ctx, query, params, "failed to create queen")
 }
 
 // GetQueenByID retrieves a single Queen node from the graph.
@@ -172,15 +202,14 @@ func (r *Repository) GetQueenByID(ctx context.Context, id string) (*domain.Queen
 // CreateHouse persists or merges a House node in the graph database.
 func (r *Repository) CreateHouse(ctx context.Context, h *domain.House) error {
 	query := `
-		MERGE (h:House {id: $id})
-		SET h.name = $name
+		CREATE (h:House {id: $id, name: $name})
 		RETURN h
 	`
 	params := map[string]any{
 		"id":   h.ID,
 		"name": h.Name,
 	}
-	return r.executeNodeMerge(ctx, query, params, "failed to create house")
+	return r.executeNodeCreate(ctx, query, params, "failed to create house")
 }
 
 // GetHouseByID retrieves a single House node from the graph.
@@ -201,9 +230,7 @@ func (r *Repository) GetHouseByID(ctx context.Context, id string) (*domain.House
 // CreateSeason persists or merges a Season node in the graph database.
 func (r *Repository) CreateSeason(ctx context.Context, s *domain.Season) error {
 	query := `
-		MERGE (s:Season {id: $id})
-		SET s.name = $name,
-		    s.franchiseId = $franchiseId
+		CREATE (s:Season {id: $id, name: $name, franchiseId: $franchiseId})
 		RETURN s
 	`
 	params := map[string]any{
@@ -211,7 +238,7 @@ func (r *Repository) CreateSeason(ctx context.Context, s *domain.Season) error {
 		"name":        s.Name,
 		"franchiseId": s.FranchiseID,
 	}
-	return r.executeNodeMerge(ctx, query, params, "failed to create season")
+	return r.executeNodeCreate(ctx, query, params, "failed to create season")
 }
 
 // GetSeasonByID retrieves a single Season node from the graph.

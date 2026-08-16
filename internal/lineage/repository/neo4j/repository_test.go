@@ -84,6 +84,10 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 	// Initialize Repository
 	repo := lineage_neo4j.NewRepository(driver)
 
+	// Idempotently create uniqueness constraints
+	constraintErr := repo.EnsureConstraints(ctx)
+	require.NoError(t, constraintErr)
+
 	t.Run("Create and Get Queen", func(t *testing.T) {
 		clearDatabase(ctx, t, driver)
 
@@ -105,6 +109,24 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		assert.Equal(t, q.RealName, retrieved.RealName)
 		assert.Equal(t, q.BirthPlace, retrieved.BirthPlace)
 		assert.ElementsMatch(t, q.Classifications, retrieved.Classifications)
+	})
+
+	t.Run("Create Duplicate Queen Returns ErrAlreadyExists", func(t *testing.T) {
+		clearDatabase(ctx, t, driver)
+
+		q := &domain.Queen{
+			ID:              "queen-1",
+			DragName:        "Gigi Goode",
+			RealName:        "Gigi",
+			BirthPlace:      "Los Angeles",
+			Classifications: []string{"fashion queen"},
+		}
+
+		err := repo.CreateQueen(ctx, q)
+		assert.NoError(t, err)
+
+		err = repo.CreateQueen(ctx, q)
+		assert.ErrorIs(t, err, domain.ErrAlreadyExists)
 	})
 
 	t.Run("Get Non-Existent Queen Returns NotFound", func(t *testing.T) {
@@ -133,6 +155,21 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		assert.Equal(t, h.Name, retrieved.Name)
 	})
 
+	t.Run("Create Duplicate House Returns ErrAlreadyExists", func(t *testing.T) {
+		clearDatabase(ctx, t, driver)
+
+		h := &domain.House{
+			ID:   "house-1",
+			Name: "House of Avalon",
+		}
+
+		err := repo.CreateHouse(ctx, h)
+		assert.NoError(t, err)
+
+		err = repo.CreateHouse(ctx, h)
+		assert.ErrorIs(t, err, domain.ErrAlreadyExists)
+	})
+
 	t.Run("Create and Get Season", func(t *testing.T) {
 		clearDatabase(ctx, t, driver)
 
@@ -150,6 +187,22 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		assert.Equal(t, s.ID, retrieved.ID)
 		assert.Equal(t, s.Name, retrieved.Name)
 		assert.Equal(t, s.FranchiseID, retrieved.FranchiseID)
+	})
+
+	t.Run("Create Duplicate Season Returns ErrAlreadyExists", func(t *testing.T) {
+		clearDatabase(ctx, t, driver)
+
+		s := &domain.Season{
+			ID:          "season-1",
+			Name:        "Season 12",
+			FranchiseID: "franchise-1",
+		}
+
+		err := repo.CreateSeason(ctx, s)
+		assert.NoError(t, err)
+
+		err = repo.CreateSeason(ctx, s)
+		assert.ErrorIs(t, err, domain.ErrAlreadyExists)
 	})
 
 	t.Run("Add Relationships and Verify ErrNotFound on Invalid Node IDs", func(t *testing.T) {
