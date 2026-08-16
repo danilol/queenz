@@ -8,6 +8,7 @@ import (
 	"queenx/internal/core/domain"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type seasonRepository struct {
@@ -26,6 +27,10 @@ func (r *seasonRepository) Create(ctx context.Context, s *domain.Season) error {
 	`
 	_, err := r.db.Exec(ctx, query, s.ID, s.FranchiseID, s.Name, s.Number, s.AirDate, s.CreatedAt, s.UpdatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("creating season: %w", domain.ErrAlreadyExists)
+		}
 		return fmt.Errorf("creating season: %w", err)
 	}
 	return nil

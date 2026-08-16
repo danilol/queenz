@@ -9,6 +9,7 @@ import (
 	"queenx/internal/core/domain"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pashagolub/pgxmock/v4"
 )
 
@@ -50,6 +51,17 @@ func TestFranchiseRepository_Create(t *testing.T) {
 		err := repo.Create(ctx, f)
 		if err == nil {
 			t.Error("expected error, got nil")
+		}
+	})
+
+	t.Run("already exists", func(t *testing.T) {
+		mock.ExpectExec("INSERT INTO franchises").
+			WithArgs(f.ID, f.Name, f.Country, f.CreatedAt, f.UpdatedAt).
+			WillReturnError(&pgconn.PgError{Code: "23505"})
+
+		err := repo.Create(ctx, f)
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			t.Errorf("expected ErrAlreadyExists, got %v", err)
 		}
 	})
 }
