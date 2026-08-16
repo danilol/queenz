@@ -8,6 +8,7 @@ import (
 	"queenx/internal/core/domain"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type franchiseRepository struct {
@@ -26,6 +27,10 @@ func (r *franchiseRepository) Create(ctx context.Context, f *domain.Franchise) e
 	`
 	_, err := r.db.Exec(ctx, query, f.ID, f.Name, f.Country, f.CreatedAt, f.UpdatedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("creating franchise: %w", domain.ErrAlreadyExists)
+		}
 		return fmt.Errorf("creating franchise: %w", err)
 	}
 	return nil

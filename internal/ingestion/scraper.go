@@ -3,6 +3,7 @@ package ingestion
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,6 +17,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const concurrencyLimit = 4
+
 // Scraper defines the interface for our concurrent wiki scraper.
 type Scraper interface {
 	ScrapeFranchises(ctx context.Context) ([]*parser.ScrapedFranchise, error)
@@ -28,6 +31,10 @@ type wikiScraper struct {
 	baseURL       string
 	mainPagePath  string
 	baseCollector *colly.Collector
+	isLiveFandom  bool
+	client        *http.Client
+	mu            sync.Mutex
+	lastReqTime   time.Time
 }
 
 type wikiAPIResponse struct {
@@ -64,22 +71,55 @@ func NewScraper(baseURL string) Scraper {
 		DomainRegexp: `rupaulsdragrace\.fandom\.com`,
 		Delay:        100 * time.Millisecond, // fast but polite
 		RandomDelay:  50 * time.Millisecond,
-		Parallelism:  4, // moderate concurrency
+		Parallelism:  concurrencyLimit, // moderate concurrency
 	})
+
+	isLive := strings.Contains(baseURL, "rupaulsdragrace.fandom.com")
+
+	client := &http.Client{
+		Timeout: 10 * time.Second, // finite timeout
+	}
 
 	return &wikiScraper{
 		baseURL:       baseURL,
 		mainPagePath:  "/wiki/Drag_Race_(Franchise)",
 		baseCollector: c,
+		isLiveFandom:  isLive,
+		client:        client,
 	}
 }
 
 // fetchHTML fetches the HTML of a page. It uses the MediaWiki Parse API for live Fandom scraping
 // to bypass Cloudflare 403 Forbidden blocks, and falls back to Colly for local mock server tests.
 func (ws *wikiScraper) fetchHTML(ctx context.Context, wikiPath string) (string, error) {
-	if strings.Contains(ws.baseURL, "rupaulsdragrace.fandom.com") {
+	if ws.isLiveFandom {
+		// Enforce spacing and politeness delay
+		ws.mu.Lock()
+		elapsed := time.Since(ws.lastReqTime)
+		if elapsed < 100*time.Millisecond {
+			ws.mu.Unlock()
+			select {
+			case <-time.After(100*time.Millisecond - elapsed):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			ws.mu.Lock()
+		}
+		ws.lastReqTime = time.Now()
+		ws.mu.Unlock()
+
 		pageName := strings.TrimPrefix(wikiPath, "/wiki/")
-		apiURL := fmt.Sprintf("%s/api.php?action=parse&page=%s&format=json", ws.baseURL, pageName)
+
+		u, err := url.Parse(ws.baseURL + "/api.php")
+		if err != nil {
+			return "", fmt.Errorf("parsing API base URL: %w", err)
+		}
+		q := url.Values{}
+		q.Set("action", "parse")
+		q.Set("page", pageName)
+		q.Set("format", "json")
+		u.RawQuery = q.Encode()
+		apiURL := u.String()
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 		if err != nil {
@@ -88,7 +128,7 @@ func (ws *wikiScraper) fetchHTML(ctx context.Context, wikiPath string) (string, 
 
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := ws.client.Do(req)
 		if err != nil {
 			return "", fmt.Errorf("dispatching request: %w", err)
 		}
@@ -106,8 +146,19 @@ func (ws *wikiScraper) fetchHTML(ctx context.Context, wikiPath string) (string, 
 		return apiResp.Parse.Text.HTML, nil
 	}
 
+	// Check if context is already canceled before starting
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	// Fallback to Colly for local test servers
 	c := ws.baseCollector.Clone()
+
+	// Apply context deadline as request timeout when available
+	if deadline, ok := ctx.Deadline(); ok {
+		c.SetRequestTimeout(time.Until(deadline))
+	}
+
 	var htmlContent string
 	var fetchErr error
 
@@ -156,23 +207,21 @@ func (ws *wikiScraper) ScrapeEpisodes(ctx context.Context, s *parser.ScrapedSeas
 	return parser.ParseEpisodes(s.Name, htmlContent)
 }
 
-func (ws *wikiScraper) Orchestrate(ctx context.Context) ([]*parser.ScrapedFranchise, []*parser.ScrapedSeason, []*parser.ScrapedEpisode, error) {
-	// 1. Scrape all franchises
-	franchises, err := ws.ScrapeFranchises(ctx)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("orchestrating franchises: %w", err)
-	}
-
-	// 2. Concurrently scrape seasons for each franchise using errgroup
+func boundedFanOut[Input any, Output any](
+	ctx context.Context,
+	inputs []Input,
+	processor func(context.Context, Input) ([]Output, error),
+) ([]Output, error) {
 	g, gCtx := errgroup.WithContext(ctx)
-	var seasonsMu sync.Mutex
-	var allSeasons []*parser.ScrapedSeason
+	var mu sync.Mutex
+	var results []Output
+	var errs []error
+	var errsMu sync.Mutex
 
-	// Limit simultaneous active HTTP scrapes to prevent overwhelming the wiki or memory
-	sem := make(chan struct{}, 4)
+	sem := make(chan struct{}, concurrencyLimit)
 
-	for _, f := range franchises {
-		fCopy := f // capture loop variable
+	for _, in := range inputs {
+		inCopy := in
 		g.Go(func() error {
 			select {
 			case sem <- struct{}{}:
@@ -181,50 +230,60 @@ func (ws *wikiScraper) Orchestrate(ctx context.Context) ([]*parser.ScrapedFranch
 			}
 			defer func() { <-sem }()
 
-			seasons, err := ws.ScrapeSeasons(gCtx, fCopy)
+			res, err := processor(gCtx, inCopy)
 			if err != nil {
+				errsMu.Lock()
+				errs = append(errs, err)
+				errsMu.Unlock()
 				return nil
 			}
 
-			seasonsMu.Lock()
-			allSeasons = append(allSeasons, seasons...)
-			seasonsMu.Unlock()
+			mu.Lock()
+			results = append(results, res...)
+			mu.Unlock()
 			return nil
 		})
 	}
 
 	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
+	return results, nil
+}
+
+func (ws *wikiScraper) Orchestrate(ctx context.Context) ([]*parser.ScrapedFranchise, []*parser.ScrapedSeason, []*parser.ScrapedEpisode, error) {
+	// 1. Scrape all franchises
+	franchises, err := ws.ScrapeFranchises(ctx)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("orchestrating franchises: %w", err)
+	}
+
+	// 2. Concurrently scrape seasons for each franchise using generic bounded-fan-out helper
+	allSeasons, err := boundedFanOut(ctx, franchises, func(gCtx context.Context, f *parser.ScrapedFranchise) ([]*parser.ScrapedSeason, error) {
+		seasons, scrapeErr := ws.ScrapeSeasons(gCtx, f)
+		if scrapeErr != nil {
+			return nil, fmt.Errorf("scraping seasons for %s: %w", f.Name, scrapeErr)
+		}
+		return seasons, nil
+	})
+	if err != nil {
 		return nil, nil, nil, fmt.Errorf("orchestrating seasons: %w", err)
 	}
 
 	// 3. Concurrently scrape episodes for each season
-	g2, g2Ctx := errgroup.WithContext(ctx)
-	var episodesMu sync.Mutex
-	var allEpisodes []*parser.ScrapedEpisode
-
-	for _, s := range allSeasons {
-		sCopy := s // capture loop variable
-		g2.Go(func() error {
-			select {
-			case sem <- struct{}{}:
-			case <-g2Ctx.Done():
-				return g2Ctx.Err()
-			}
-			defer func() { <-sem }()
-
-			episodes, err := ws.ScrapeEpisodes(g2Ctx, sCopy)
-			if err != nil {
-				return nil
-			}
-
-			episodesMu.Lock()
-			allEpisodes = append(allEpisodes, episodes...)
-			episodesMu.Unlock()
-			return nil
-		})
-	}
-
-	if err := g2.Wait(); err != nil {
+	allEpisodes, err := boundedFanOut(ctx, allSeasons, func(gCtx context.Context, s *parser.ScrapedSeason) ([]*parser.ScrapedEpisode, error) {
+		episodes, scrapeErr := ws.ScrapeEpisodes(gCtx, s)
+		if scrapeErr != nil {
+			return nil, fmt.Errorf("scraping episodes for %s: %w", s.Name, scrapeErr)
+		}
+		return episodes, nil
+	})
+	if err != nil {
 		return nil, nil, nil, fmt.Errorf("orchestrating episodes: %w", err)
 	}
 

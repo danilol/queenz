@@ -65,7 +65,7 @@ type Person struct {
 	DragName string `json:"drag_name"`
 	// RealName is the legal name of the artist, if publicly documented and available.
 	RealName string `json:"real_name"`
-	// BirthPlace indicates the city/state/country where the artist was born or resides.
+	// BirthPlace indicates the city, state, or country where the artist was born.
 	BirthPlace string `json:"birth_place"`
 	// CreatedAt marks when this performer was first recorded in our system.
 	CreatedAt time.Time `json:"created_at"`

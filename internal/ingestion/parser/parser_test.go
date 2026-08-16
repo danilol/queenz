@@ -42,7 +42,7 @@ func TestParseFranchises(t *testing.T) {
 		}
 
 		if len(franchises) != 2 {
-			t.Errorf("expected 2 franchises, got %d", len(franchises))
+			t.Fatalf("expected 2 franchises, got %d", len(franchises))
 		}
 
 		if franchises[0].Name != "RuPaul's Drag Race" || franchises[0].Country != "United States" || franchises[0].WikiURL != "/wiki/RuPaul%27s_Drag_Race" {
@@ -106,21 +106,21 @@ func TestParseSeasons(t *testing.T) {
 		}
 
 		if len(seasons) != 3 {
-			t.Errorf("expected 3 seasons, got %d", len(seasons))
+			t.Fatalf("expected 3 seasons, got %d", len(seasons))
 		}
 
 		expectedDate1, _ := time.Parse("2006-01-02", "2009-02-02")
-		if seasons[0].Name != "Season 1" || seasons[0].Number != 1 || !seasons[0].AirDate.Equal(expectedDate1) || seasons[0].WikiURL != "/wiki/RuPaul%27s_Drag_Race_(season_1)" {
+		if seasons[0].Name != "Season 1" || seasons[0].Number != 1 || seasons[0].AirDate == nil || !seasons[0].AirDate.Equal(expectedDate1) || seasons[0].WikiURL != "/wiki/RuPaul%27s_Drag_Race_(season_1)" {
 			t.Errorf("unexpected first season: %+v", seasons[0])
 		}
 
 		expectedDate2, _ := time.Parse("2006-01-02", "2010-02-01")
-		if seasons[1].Name != "Season 2" || seasons[1].Number != 2 || !seasons[1].AirDate.Equal(expectedDate2) || seasons[1].WikiURL != "/wiki/RuPaul%27s_Drag_Race_(season_2)" {
+		if seasons[1].Name != "Season 2" || seasons[1].Number != 2 || seasons[1].AirDate == nil || !seasons[1].AirDate.Equal(expectedDate2) || seasons[1].WikiURL != "/wiki/RuPaul%27s_Drag_Race_(season_2)" {
 			t.Errorf("unexpected second season: %+v", seasons[1])
 		}
 
 		expectedDate3, _ := time.Parse("2006-01-02", "2011-01-03")
-		if seasons[2].Name != "The Third Season" || seasons[2].Number != 3 || !seasons[2].AirDate.Equal(expectedDate3) || seasons[2].WikiURL != "/wiki/RuPaul%27s_Drag_Race_(Season_3)" {
+		if seasons[2].Name != "The Third Season" || seasons[2].Number != 3 || seasons[2].AirDate == nil || !seasons[2].AirDate.Equal(expectedDate3) || seasons[2].WikiURL != "/wiki/RuPaul%27s_Drag_Race_(Season_3)" {
 			t.Errorf("unexpected third season (href fallback): %+v", seasons[2])
 		}
 	})
@@ -184,26 +184,26 @@ func TestParseEpisodes(t *testing.T) {
 		}
 
 		if len(episodes) != 4 {
-			t.Errorf("expected 4 valid episodes, got %d", len(episodes))
+			t.Fatalf("expected 4 valid episodes, got %d", len(episodes))
 		}
 
 		expectedDate1, _ := time.Parse("2006-01-02", "2009-02-02")
-		if episodes[0].Number != 1 || episodes[0].Title != "Drag on a Dime" || !episodes[0].AirDate.Equal(expectedDate1) {
+		if episodes[0].Number != 1 || episodes[0].Title != "Drag on a Dime" || episodes[0].AirDate == nil || !episodes[0].AirDate.Equal(expectedDate1) {
 			t.Errorf("unexpected first episode: %+v", episodes[0])
 		}
 
 		expectedDate2, _ := time.Parse("2006-01-02", "2009-02-09")
-		if episodes[1].Number != 2 || episodes[1].Title != "Girl Groups" || !episodes[1].AirDate.Equal(expectedDate2) {
+		if episodes[1].Number != 2 || episodes[1].Title != "Girl Groups" || episodes[1].AirDate == nil || !episodes[1].AirDate.Equal(expectedDate2) {
 			t.Errorf("unexpected second episode: %+v", episodes[1])
 		}
 
 		expectedDate3, _ := time.Parse("2006-01-02", "2009-02-16")
-		if episodes[2].Number != 3 || episodes[2].Title != "Queens of Comedy" || !episodes[2].AirDate.Equal(expectedDate3) {
+		if episodes[2].Number != 3 || episodes[2].Title != "Queens of Comedy" || episodes[2].AirDate == nil || !episodes[2].AirDate.Equal(expectedDate3) {
 			t.Errorf("unexpected third episode (two-column offset): %+v", episodes[2])
 		}
 
 		expectedDate4, _ := time.Parse("2006-01-02", "2009-02-23")
-		if episodes[3].Number != 4 || episodes[3].Title != "Episode 4" || !episodes[3].AirDate.Equal(expectedDate4) {
+		if episodes[3].Number != 4 || episodes[3].Title != "Episode 4" || episodes[3].AirDate == nil || !episodes[3].AirDate.Equal(expectedDate4) {
 			t.Errorf("unexpected fourth episode (generic label/title): %+v", episodes[3])
 		}
 	})

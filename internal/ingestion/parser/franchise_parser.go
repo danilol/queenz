@@ -25,7 +25,7 @@ func ParseFranchises(htmlContent string) ([]*ScrapedFranchise, error) {
 
 		cells := s.Find("td")
 		if cells.Length() >= 2 {
-			link := cells.Eq(0).Find("a")
+			link := cells.Eq(0).Find("a").First()
 			name := strings.TrimSpace(link.Text())
 			href, exists := link.Attr("href")
 			country := strings.TrimSpace(cells.Eq(1).Text())

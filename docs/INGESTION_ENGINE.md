@@ -1,6 +1,6 @@
 # 🌐 Ingestion Engine: Concurrency, Architecture, & Anti-Blocking
 
-The **Ingestion Context** (`internal/ingestion/`) is a high-performance, asynchronous web crawling and HTML parsing engine designed to extract rich data from the Fandom Drag Race Wiki and map it directly into the system's core domain models.
+The **Ingestion Context** (`internal/ingestion/`) is a high-performance, asynchronous web crawling and HTML parsing engine designed to extract rich data from the Fandom Drag Race Wiki; the scraper returns parser.Scraped* DTOs, and a later layer maps those DTOs into the system's core domain models.
 
 ---
 

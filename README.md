@@ -48,10 +48,10 @@ queenx-go/
 
 This project contains runnable executables and CLI tools located under the `cmd/` directory.
 
-### 1. Interactive CLI Scraper Demo
-We provide a real-time, interactive command-line scraper demo that fetches live data from the RuPaul's Drag Race Fandom Wiki. It showcases our asynchronous fetching pipeline, the production-ready MediaWiki JSON API bypass mechanism, and HTML parsers.
+### 1. CLI Scraper Ingestion Demo
+We provide a real-time, non-interactive command-line scraper demo that fetches live data from the RuPaul's Drag Race Fandom Wiki. It showcases our asynchronous fetching pipeline, the production-ready MediaWiki JSON API bypass mechanism, and HTML parsers.
 
-To run the interactive scraper demo, run:
+To run the scraper ingestion demo, run:
 ```bash
 go run cmd/demo/main.go
 ```

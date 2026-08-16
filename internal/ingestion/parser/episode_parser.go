@@ -28,10 +28,12 @@ func ParseEpisodes(seasonName, htmlContent string) ([]*ScrapedEpisode, error) {
 		cells := s.Find("td")
 		if cells.Length() >= 3 {
 			// Extract episode number
+			epNumIdx := 0
 			rawNum := cleanString(cells.Eq(0).Text())
 			num, err := strconv.Atoi(rawNum)
 			if err != nil {
 				// Sometimes there is a column for "No. overall" and "No. in season", let's try the second column
+				epNumIdx = 1
 				rawNum = cleanString(cells.Eq(1).Text())
 				num, err = strconv.Atoi(rawNum)
 				if err != nil {
@@ -49,23 +51,23 @@ func ParseEpisodes(seasonName, htmlContent string) ([]*ScrapedEpisode, error) {
 				}
 			}
 
-			// Fallback: if no quoted string, use the cell text of the first or second column
+			// Fallback: if no quoted string, use the next cell text after the episode number cell
 			if title == "" {
-				title = cleanString(cells.Eq(1).Text())
+				title = cleanString(cells.Eq(epNumIdx + 1).Text())
 			}
 
-			if title == "" || strings.Contains(strings.ToLower(title), "episode") && len(title) < 12 {
+			if title == "" || (strings.Contains(strings.ToLower(title), "episode")) {
 				// Skip generic episode labels if they don't have titles yet
 				title = fmt.Sprintf("Episode %d", num)
 			}
 
 			// Extract air date (look through cells starting from column 2)
-			var airDate time.Time
+			var airDate *time.Time
 			var foundDate bool
 			for idx := 2; idx < cells.Length(); idx++ {
 				txt := cleanString(cells.Eq(idx).Text())
 				if parsedDate, ok := tryParseDate(txt); ok {
-					airDate = parsedDate
+					airDate = &parsedDate
 					foundDate = true
 					break
 				}

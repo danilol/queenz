@@ -82,7 +82,7 @@ func runDemo() error {
 	for i := 0; i < displayLimit; i++ {
 		s := seasons[i]
 		airDateStr := "TBA"
-		if !s.AirDate.IsZero() {
+		if s.AirDate != nil && !s.AirDate.IsZero() {
 			airDateStr = s.AirDate.Format("January 2, 2006")
 		}
 		fmt.Printf("   Season %-2d | Name: %-15s | Air Date: %-18s | Path: %s\n", s.Number, s.Name, airDateStr, s.WikiURL)
@@ -118,7 +118,7 @@ func runDemo() error {
 	fmt.Printf("🎬 Episode Guide for '%s':\n", selectedSeason.Name)
 	for _, ep := range episodes {
 		airDateStr := "TBA"
-		if !ep.AirDate.IsZero() {
+		if ep.AirDate != nil && !ep.AirDate.IsZero() {
 			airDateStr = ep.AirDate.Format("Jan 02, 2006")
 		}
 		fmt.Printf("   Episode %-2d | Title: %-30s | Air Date: %s\n", ep.Number, ep.Title, airDateStr)

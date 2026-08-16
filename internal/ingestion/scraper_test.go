@@ -14,15 +14,28 @@ func TestWikiScraper_Orchestrate(t *testing.T) {
 		case "/wiki/Drag_Race_(Franchise)":
 			// Main wiki page listing franchises
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`
-				<html>
-				<body>
-					<table class="wikitable">
-						<tr><td><a href="/wiki/RuPaul%27s_Drag_Race">RuPaul's Drag Race</a></td><td>United States</td></tr>
-					</table>
-				</body>
-				</html>
-			`))
+			if r.URL.Query().Get("partial") == "true" {
+				_, _ = w.Write([]byte(`
+					<html>
+					<body>
+						<table class="wikitable">
+							<tr><td><a href="/wiki/RuPaul%27s_Drag_Race">RuPaul's Drag Race</a></td><td>United States</td></tr>
+							<tr><td><a href="/wiki/Failing_Franchise">Failing Franchise</a></td><td>Spain</td></tr>
+						</table>
+					</body>
+					</html>
+				`))
+			} else {
+				_, _ = w.Write([]byte(`
+					<html>
+					<body>
+						<table class="wikitable">
+							<tr><td><a href="/wiki/RuPaul%27s_Drag_Race">RuPaul's Drag Race</a></td><td>United States</td></tr>
+						</table>
+					</body>
+					</html>
+				`))
+			}
 
 		case "/wiki/RuPaul's_Drag_Race":
 			// Franchise page listing seasons
@@ -36,6 +49,9 @@ func TestWikiScraper_Orchestrate(t *testing.T) {
 				</body>
 				</html>
 			`))
+
+		case "/wiki/Failing_Franchise":
+			w.WriteHeader(http.StatusInternalServerError)
 
 		case "/wiki/RuPaul's_Drag_Race_(season_1)":
 			// Season page listing episodes
@@ -91,9 +107,33 @@ func TestWikiScraper_Orchestrate(t *testing.T) {
 		}
 	})
 
+	t.Run("partial failure on season", func(t *testing.T) {
+		partialScraper := NewScraper(server.URL)
+		partialScraper.(*wikiScraper).mainPagePath = "/wiki/Drag_Race_(Franchise)?partial=true"
+
+		_, _, _, err := partialScraper.Orchestrate(ctx)
+		if err == nil {
+			t.Error("expected Orchestrate to fail when a season request fails with HTTP 500, got nil")
+		}
+	})
+
+	t.Run("orchestration cancellation", func(t *testing.T) {
+		cancelCtx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+
+		_, _, _, err := scraper.Orchestrate(cancelCtx)
+		if err == nil {
+			t.Error("expected context canceled error, got nil")
+		}
+	})
+
 	t.Run("individual scrape failures", func(t *testing.T) {
-		// Test behavior with individual failing URLs
-		badScraper := NewScraper("http://localhost:54321") // non-existent local port to force failure
+		// Obtain an unused URL from an httptest server
+		failServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		badURL := failServer.URL
+		failServer.Close() // close the server to trigger a connection failure
+
+		badScraper := NewScraper(badURL)
 		_, _, _, err := badScraper.Orchestrate(ctx)
 		if err == nil {
 			t.Error("expected orchestrator error on unreachable base URL, got nil")

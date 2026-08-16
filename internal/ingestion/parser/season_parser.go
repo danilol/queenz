@@ -12,6 +12,7 @@ import (
 )
 
 var seasonNumRegex = regexp.MustCompile(`(?i)Season[\s_-]*(\d+)`)
+var footnoteRegex = regexp.MustCompile(`\[\d+\]`)
 
 // ParseSeasons parses seasons for a specific franchise from its HTML page.
 func ParseSeasons(franchiseName, htmlContent string) ([]*ScrapedSeason, error) {
@@ -30,7 +31,7 @@ func ParseSeasons(franchiseName, htmlContent string) ([]*ScrapedSeason, error) {
 
 		cells := s.Find("td")
 		if cells.Length() >= 2 {
-			link := cells.Eq(0).Find("a")
+			link := cells.Eq(0).Find("a").First()
 			name := strings.TrimSpace(link.Text())
 			href, exists := link.Attr("href")
 
@@ -43,22 +44,26 @@ func ParseSeasons(franchiseName, htmlContent string) ([]*ScrapedSeason, error) {
 				}
 
 				// Find air date (usually in subsequent columns, let's look for first parseable date)
-				var airDate time.Time
+				var airDate *time.Time
+				var foundDate bool
 				for idx := 1; idx < cells.Length(); idx++ {
 					cleanedText := cleanString(cells.Eq(idx).Text())
 					if parsedDate, ok := tryParseDate(cleanedText); ok {
-						airDate = parsedDate
+						airDate = &parsedDate
+						foundDate = true
 						break
 					}
 				}
 
-				seasons = append(seasons, &ScrapedSeason{
-					FranchiseName: franchiseName,
-					Name:          name,
-					Number:        number,
-					AirDate:       airDate,
-					WikiURL:       href,
-				})
+				if foundDate {
+					seasons = append(seasons, &ScrapedSeason{
+						FranchiseName: franchiseName,
+						Name:          name,
+						Number:        number,
+						AirDate:       airDate,
+						WikiURL:       href,
+					})
+				}
 			}
 		}
 	})
@@ -76,7 +81,10 @@ func extractSeasonNumber(name, href string) int {
 	}
 
 	// Try href (e.g. "/wiki/RuPaul%27s_Drag_Race_(season_1)")
-	decoded, _ := url.QueryUnescape(href)
+	decoded, err := url.PathUnescape(href)
+	if err != nil {
+		return 0
+	}
 	matches = seasonNumRegex.FindStringSubmatch(decoded)
 	if len(matches) == 2 {
 		if val, err := strconv.Atoi(matches[1]); err == nil {
@@ -89,8 +97,7 @@ func extractSeasonNumber(name, href string) int {
 
 func cleanString(val string) string {
 	// Remove footnotes like [1] or references, trailing newlines
-	re := regexp.MustCompile(`\[\d+\]`)
-	cleaned := re.ReplaceAllString(val, "")
+	cleaned := footnoteRegex.ReplaceAllString(val, "")
 	return strings.TrimSpace(cleaned)
 }
 
