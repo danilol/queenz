@@ -85,6 +85,7 @@ func (r *seasonRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+//nolint:dupl // similar list method for child relation
 func (r *seasonRepository) ListByFranchiseID(ctx context.Context, franchiseID string) ([]*domain.Season, error) {
 	query := `
 		SELECT id, franchise_id, name, number, air_date, created_at, updated_at
