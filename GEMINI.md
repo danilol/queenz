@@ -112,6 +112,6 @@ We follow **Layered Architecture** and **DDD**. Logic for a domain lives in `int
 - **Phase 1**: Relational Models & PostgreSQL Repositories (Completed)
 - **Phase 2**: HTML/API Scraping & Ingestion Engines (Completed)
 - **Phase 3**: Lineage Context & Neo4j Integration (Completed)
-- **Phase 4**: API presentation, BFF (Echo), and Asynchronous Ingestion Job Worker
+- **Phase 4**: API presentation, BFF (Echo), and Asynchronous Ingestion Job Worker (Completed)
 - **Phase 5**: AI Persona Engine (Gemini SSE & Fal.ai)
 - **Phase 6**: Next.js Interactive Dashboard (with Scraper Execution Button)

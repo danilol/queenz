@@ -51,3 +51,27 @@ type SeasonRepository interface {
 	// Returns an empty slice and no error if no seasons are found.
 	ListByFranchiseID(ctx context.Context, franchiseID string) ([]*Season, error)
 }
+
+// EpisodeRepository defines the database abstraction and data-store operations
+// for the Episode domain model in the relational repository layer.
+type EpisodeRepository interface {
+	// Create persists a new Episode record in the relational store.
+	// Returns ErrAlreadyExists if an Episode with the same ID already exists.
+	Create(ctx context.Context, e *Episode) error
+
+	// GetByID retrieves a single Episode by its unique ID.
+	// Returns ErrNotFound if the Episode cannot be located.
+	GetByID(ctx context.Context, id string) (*Episode, error)
+
+	// Update modifies the fields of an existing Episode.
+	// Returns ErrNotFound if the record does not exist.
+	Update(ctx context.Context, e *Episode) error
+
+	// Delete removes an Episode from the store.
+	// Returns ErrNotFound if the record does not exist.
+	Delete(ctx context.Context, id string) error
+
+	// ListBySeasonID retrieves all Episodes belonging to a specific Season ID.
+	// Returns an empty slice and no error if no episodes are found.
+	ListBySeasonID(ctx context.Context, seasonID string) ([]*Episode, error)
+}
