@@ -464,6 +464,73 @@ func (r *Repository) FindAestheticSiblings(ctx context.Context, queenID string, 
 	return siblings, nil
 }
 
+// FindQueensByClassifications retrieves queens that match any of the given classifications, ordered by the number of shared matches.
+func (r *Repository) FindQueensByClassifications(ctx context.Context, classifications []string, limit int) ([]*domain.Queen, error) {
+	if limit <= 0 {
+		limit = 100 // default limit
+	}
+
+	session := r.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer func() { _ = session.Close(ctx) }()
+
+	query := `
+		MATCH (q:Queen)
+		WITH q, size([c IN coalesce(q.classifications, []) WHERE c IN $classifications]) AS sharedCount
+		WHERE sharedCount > 0
+		RETURN q, sharedCount
+		ORDER BY sharedCount DESC, q.dragName ASC
+		LIMIT $limit
+	`
+
+	params := map[string]any{
+		classificationsParam: classifications,
+		"limit":              limit,
+	}
+
+	resultsVal, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx, query, params)
+		if err != nil {
+			return nil, err
+		}
+
+		var queens []*domain.Queen
+		for res.Next(ctx) {
+			record := res.Record()
+			node, ok := record.Get("q")
+			if !ok {
+				continue
+			}
+			qNode, ok := node.(neo4j.Node)
+			if !ok {
+				continue
+			}
+
+			props := qNode.GetProperties()
+			queen := &domain.Queen{
+				ID:              mapStringProp(props, "id"),
+				DragName:        mapStringProp(props, "dragName"),
+				RealName:        mapStringProp(props, "realName"),
+				BirthPlace:      mapStringProp(props, birthPlaceParam),
+				Classifications: mapStringSliceProp(props, classificationsParam),
+			}
+			queens = append(queens, queen)
+		}
+		if err := res.Err(); err != nil {
+			return nil, err
+		}
+		return queens, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to find queens by classifications: %w", err)
+	}
+
+	queens, ok := resultsVal.([]*domain.Queen)
+	if !ok {
+		return nil, fmt.Errorf("unexpected results type: %T", resultsVal)
+	}
+	return queens, nil
+}
+
 // Property mapping helpers
 
 func mapStringProp(props map[string]any, key string) string {

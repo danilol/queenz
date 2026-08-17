@@ -10,6 +10,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.4
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/pashagolub/pgxmock/v4 v4.9.0
+	github.com/sony/gobreaker v1.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/neo4j v0.44.0
 	golang.org/x/sync v0.22.0

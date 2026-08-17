@@ -23,6 +23,7 @@ type Server struct {
 	franchiseH *handler.FranchiseHandler
 	lineageH   *handler.LineageHandler
 	jobH       *handler.JobHandler
+	personaH   *handler.PersonaHandler
 	logger     *slog.Logger
 }
 
@@ -32,6 +33,7 @@ func NewServer(
 	franchiseH *handler.FranchiseHandler,
 	lineageH *handler.LineageHandler,
 	jobH *handler.JobHandler,
+	personaH *handler.PersonaHandler,
 	logger *slog.Logger,
 ) *Server {
 	e := echo.New()
@@ -43,6 +45,7 @@ func NewServer(
 		franchiseH: franchiseH,
 		lineageH:   lineageH,
 		jobH:       jobH,
+		personaH:   personaH,
 		logger:     logger,
 	}
 
@@ -73,6 +76,9 @@ func (s *Server) setupRoutes() {
 	v1.POST("/jobs/ingest", s.jobH.CreateJob)
 	v1.GET("/jobs/:id", s.jobH.GetJob)
 	v1.GET("/jobs/:id/progress", s.jobH.GetJobProgressSSE)
+
+	// Persona routes
+	v1.GET("/persona/generate", s.personaH.GeneratePersona)
 }
 
 // Start runs the HTTP server.
