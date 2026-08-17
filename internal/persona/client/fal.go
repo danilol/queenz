@@ -69,15 +69,18 @@ type falBreakerResult struct {
 	body       []byte
 }
 
+type falError struct {
+	result *falBreakerResult
+}
+
+func (e *falError) Error() string {
+	return fmt.Sprintf("fal.ai returned retryable error status: %d", e.result.statusCode)
+}
+
 // GenerateImage sends a request to the Fal.ai API with retry logic and circuit breaking.
 func (f *FalClient) GenerateImage(ctx context.Context, prompt string) (string, error) {
 	if f.apiKey == "" {
 		return "", fmt.Errorf("fal.ai API key is not configured")
-	}
-
-	// 1. Rate Limiting check
-	if err := f.limiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf("fal.ai rate limit wait: %w", personadomain.ErrRateLimitExceeded)
 	}
 
 	payload := FalRequest{
@@ -102,6 +105,11 @@ func (f *FalClient) GenerateImage(ctx context.Context, prompt string) (string, e
 			return "", err
 		}
 
+		// 1. Rate Limiting check inside the attempt immediately before breaker.Execute
+		if err := f.limiter.Wait(ctx); err != nil {
+			return "", fmt.Errorf("fal.ai rate limit wait: %w", personadomain.ErrRateLimitExceeded)
+		}
+
 		respVal, err := f.breaker.Execute(func() (any, error) {
 			req, err := http.NewRequestWithContext(ctx, "POST", f.apiURL, bytes.NewReader(payloadBytes))
 			if err != nil {
@@ -121,26 +129,48 @@ func (f *FalClient) GenerateImage(ctx context.Context, prompt string) (string, e
 				return nil, err
 			}
 
-			return &falBreakerResult{statusCode: resp.StatusCode, body: bodyBytes}, nil
+			// If it's a 5xx retryable status, return typed error to trigger failure tracking inside the circuit breaker
+			result := &falBreakerResult{statusCode: resp.StatusCode, body: bodyBytes}
+			if resp.StatusCode >= 500 {
+				return nil, &falError{result: result}
+			}
+
+			return result, nil
 		})
 
 		if err != nil {
 			if errors.Is(err, gobreaker.ErrOpenState) {
 				return "", personadomain.ErrCircuitBreakerOpen
 			}
-			// If we hit connection error, retry after backoff
-			time.Sleep(f.calculateDelay(attempt, baseDelay, maxDelay))
+
+			var falErr *falError
+			if errors.As(err, &falErr) {
+				// Retryable 5xx error carrying response body
+				timer := time.NewTimer(f.calculateDelay(attempt, baseDelay, maxDelay))
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return "", ctx.Err()
+				case <-timer.C:
+				}
+				continue
+			}
+
+			// Connection or read issue
+			timer := time.NewTimer(f.calculateDelay(attempt, baseDelay, maxDelay))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return "", ctx.Err()
+			case <-timer.C:
+			}
 			continue
 		}
 
 		result := respVal.(*falBreakerResult)
 
 		if result.statusCode != http.StatusOK {
-			// If it's a 5xx or transient error, retry
-			if result.statusCode >= 500 {
-				time.Sleep(f.calculateDelay(attempt, baseDelay, maxDelay))
-				continue
-			}
+			// This is a non-5xx error (e.g. 4xx). We fail immediately without retry!
 			return "", fmt.Errorf("fal.ai returned error status: %d", result.statusCode)
 		}
 

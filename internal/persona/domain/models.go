@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // GeneratePersonaRequest represents the user traits requested to generate a persona.
 type GeneratePersonaRequest struct {
 	Traits []string `json:"traits"`
@@ -19,4 +21,30 @@ type PersonaResult struct {
 	Bio                   string       `json:"bio"`
 	Stats                 PersonaStats `json:"stats"`
 	ImageGenerationPrompt string       `json:"imageGenerationPrompt"`
+}
+
+// Validate rejects empty required fields and enforces statistics are within 1-10.
+func (p *PersonaResult) Validate() error {
+	if p.DragName == "" {
+		return fmt.Errorf("dragName is required")
+	}
+	if p.Bio == "" {
+		return fmt.Errorf("bio is required")
+	}
+	if p.ImageGenerationPrompt == "" {
+		return fmt.Errorf("imageGenerationPrompt is required")
+	}
+	if p.Stats.Glamour < 1 || p.Stats.Glamour > 10 {
+		return fmt.Errorf("glamour stat must be between 1 and 10: got %d", p.Stats.Glamour)
+	}
+	if p.Stats.Comedy < 1 || p.Stats.Comedy > 10 {
+		return fmt.Errorf("comedy stat must be between 1 and 10: got %d", p.Stats.Comedy)
+	}
+	if p.Stats.Dance < 1 || p.Stats.Dance > 10 {
+		return fmt.Errorf("dance stat must be between 1 and 10: got %d", p.Stats.Dance)
+	}
+	if p.Stats.Camp < 1 || p.Stats.Camp > 10 {
+		return fmt.Errorf("camp stat must be between 1 and 10: got %d", p.Stats.Camp)
+	}
+	return nil
 }

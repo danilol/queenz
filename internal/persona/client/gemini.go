@@ -28,7 +28,7 @@ type GeminiClient struct {
 
 func NewGeminiClient(apiKey, model string) *GeminiClient {
 	if model == "" {
-		model = "gemini-1.5-flash"
+		model = "gemini-2.5-flash"
 	}
 	// Limit to 2 requests per second to avoid free-tier rate limits
 	limiter := rate.NewLimiter(rate.Limit(2.0), 4)
@@ -126,7 +126,7 @@ func (g *GeminiClient) StreamGenerate(ctx context.Context, systemPrompt, prompt 
 		return "", fmt.Errorf("gemini rate limit wait: %w", personadomain.ErrRateLimitExceeded)
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", g.model, g.apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse", g.model)
 
 	reqPayload := GeminiRequest{
 		Contents: []GeminiContent{
@@ -157,6 +157,7 @@ func (g *GeminiClient) StreamGenerate(ctx context.Context, systemPrompt, prompt 
 			return nil, reqErr
 		}
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-goog-api-key", g.apiKey)
 
 		resp, respErr := g.httpClient.Do(req)
 		if respErr != nil {

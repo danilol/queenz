@@ -498,6 +498,19 @@ func TestNeo4jRepository_Integration(t *testing.T) {
 		assert.Contains(t, names, "Jinkx Monsoon")
 		assert.Contains(t, names, "Bob the Drag Queen")
 		assert.NotContains(t, names, "Gigi Goode")
+
+		// 1. One-classification query ("fashion") to verify exact ranked / alphabetical fallback order (Bob before Gigi)
+		fashionResults, err := repo.FindQueensByClassifications(ctx, []string{"fashion"}, 5)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(fashionResults))
+		assert.Equal(t, "Bob the Drag Queen", fashionResults[0].DragName, "Bob should be ranked first due to alphabetical fallback ('B' < 'G')")
+		assert.Equal(t, "Gigi Goode", fashionResults[1].DragName, "Gigi should be ranked second")
+
+		// 2. Separate query with limit 1 and assert only the top-ranked queen is returned
+		limitedResults, err := repo.FindQueensByClassifications(ctx, []string{"fashion"}, 1)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(limitedResults))
+		assert.Equal(t, "Bob the Drag Queen", limitedResults[0].DragName)
 	})
 
 	t.Run("Driver Connection Failure Errors", func(t *testing.T) {

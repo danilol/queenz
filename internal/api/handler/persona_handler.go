@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,22 @@ func NewPersonaHandler(service PersonaGenerator) *PersonaHandler {
 	return &PersonaHandler{service: service}
 }
 
+// writeSSEEvent safely JSON-encodes payloads to escape special characters/newlines and writes SSE events.
+func writeSSEEvent(w io.Writer, f http.Flusher, eventType, data string) error {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, string(encoded))
+	if err != nil {
+		return err
+	}
+	if f != nil {
+		f.Flush()
+	}
+	return nil
+}
+
 // sseChunkWriter wraps an io.Writer and formats raw text chunks into SSE "chunk" events.
 type sseChunkWriter struct {
 	w http.ResponseWriter
@@ -31,11 +48,10 @@ type sseChunkWriter struct {
 }
 
 func (sw *sseChunkWriter) Write(p []byte) (int, error) {
-	_, err := fmt.Fprintf(sw.w, "event: chunk\ndata: %s\n\n", string(p))
+	err := writeSSEEvent(sw.w, sw.f, "chunk", string(p))
 	if err != nil {
 		return 0, err
 	}
-	sw.f.Flush()
 	return len(p), nil
 }
 
@@ -86,14 +102,12 @@ func (h *PersonaHandler) GeneratePersona(c echo.Context) error {
 	_, imageURL, err := h.service.GeneratePersona(ctx, req, chunkWriter)
 	if err != nil {
 		// Send error event if we failed
-		_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", err.Error())
-		flusher.Flush()
+		_ = writeSSEEvent(w, flusher, "error", err.Error())
 		return nil // End of stream
 	}
 
 	// 5. Send final event containing the generated Fal.ai high-glamour image URL
-	_, _ = fmt.Fprintf(w, "event: image\ndata: %s\n\n", imageURL)
-	flusher.Flush()
+	_ = writeSSEEvent(w, flusher, "image", imageURL)
 
 	return nil
 }

@@ -123,3 +123,51 @@ func TestPersonaService_GeneratePersona_LineageErrorFallback(t *testing.T) {
 
 	mockLineage.AssertExpectations(t)
 }
+
+func TestPersonaService_GeneratePersona_ValidationFailures(t *testing.T) {
+	tests := []struct {
+		name         string
+		geminiOutput string
+	}{
+		{
+			name:         "empty object",
+			geminiOutput: `{}`,
+		},
+		{
+			name:         "null object",
+			geminiOutput: `null`,
+		},
+		{
+			name:         "missing imageGenerationPrompt",
+			geminiOutput: `{"dragName": "Fashionista", "bio": "Iconic", "stats": {"glamour": 10, "comedy": 7, "dance": 8, "camp": 6}}`,
+		},
+		{
+			name:         "out-of-range stat too high",
+			geminiOutput: `{"dragName": "Fashionista", "bio": "Iconic", "stats": {"glamour": 11, "comedy": 7, "dance": 8, "camp": 6}, "imageGenerationPrompt": "portrait"}`,
+		},
+		{
+			name:         "out-of-range stat too low",
+			geminiOutput: `{"dragName": "Fashionista", "bio": "Iconic", "stats": {"glamour": 0, "comedy": 7, "dance": 8, "camp": 6}, "imageGenerationPrompt": "portrait"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			mockLineage := new(MockLineageReader)
+			mockGemini := new(MockGeminiClient)
+			mockFal := new(MockFalClient)
+
+			mockLineage.On("FindQueensByClassifications", ctx, []string{"fashion"}, 3).Return(nil, nil)
+			mockGemini.On("StreamGenerate", ctx, mock.Anything, mock.Anything, mock.Anything).Return(tt.geminiOutput, tt.geminiOutput, nil)
+
+			svc := persona.NewPersonaService(mockLineage, mockGemini, mockFal)
+			req := &personadomain.GeneratePersonaRequest{Traits: []string{"fashion"}}
+
+			_, _, err := svc.GeneratePersona(ctx, req, io.Discard)
+			assert.Error(t, err)
+
+			mockFal.AssertNotCalled(t, "GenerateImage", mock.Anything)
+		})
+	}
+}

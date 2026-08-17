@@ -53,8 +53,8 @@ func TestPersonaHandler_GeneratePersona_Success(t *testing.T) {
 	assert.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
 
 	body := rec.Body.String()
-	assert.Contains(t, body, "event: chunk\ndata: lulu-chunk\n\n")
-	assert.Contains(t, body, "event: image\ndata: https://fal.media/lulu.png\n\n")
+	assert.Contains(t, body, "event: chunk\ndata: \"lulu-chunk\"\n\n")
+	assert.Contains(t, body, "event: image\ndata: \"https://fal.media/lulu.png\"\n\n")
 
 	mockGen.AssertExpectations(t)
 }
@@ -90,5 +90,5 @@ func TestPersonaHandler_GeneratePersona_ServiceError(t *testing.T) {
 
 	assert.NoError(t, err)
 	body := rec.Body.String()
-	assert.Contains(t, body, "event: error\ndata: upstream failure\n\n")
+	assert.Contains(t, body, "event: error\ndata: \"upstream failure\"\n\n")
 }
